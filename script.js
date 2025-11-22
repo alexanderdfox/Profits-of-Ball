@@ -970,6 +970,15 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         if (montecarloSection) montecarloSection.classList.add('hidden');
     }
     
+    // Create chart with predictions and indicators
+    createChart(dates, monthly, sim_prices_det, sim_prices_stoch, ticker, 
+                predictedDates, predictedPrices, predictedPricesOptimistic, predictedPricesPessimistic,
+                buyPrice, technicalIndicators);
+
+    // Show big moves (threshold is 1.5 * standard deviation)
+    const thresholdValue = delta_U_std * 1.5;
+    showBigMoves(dates, delta_U, thresholdValue);
+    
     // Return analysis results for export
     return {
         ticker,
@@ -983,15 +992,6 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         maxwellDemonMetrics: window.maxwellDemonMetrics,
         timeframe
     };
-
-    // Create chart with predictions and indicators
-    createChart(dates, monthly, sim_prices_det, sim_prices_stoch, ticker, 
-                predictedDates, predictedPrices, predictedPricesOptimistic, predictedPricesPessimistic,
-                buyPrice, technicalIndicators);
-
-    // Show big moves (threshold is 1.5 * standard deviation)
-    const thresholdValue = delta_U_std * 1.5;
-    showBigMoves(dates, delta_U, thresholdValue);
 }
 
 function calculateProfit(buyPrice, numShares, currentPrice, predictedPrice, forecastMonths) {
@@ -2028,6 +2028,13 @@ function createChart(dates, actual, deterministic, stochastic, ticker,
         }
     }
 
+    // Ensure Chart.js is loaded
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js library not loaded. Please refresh the page.');
+        showError('Chart.js library not loaded. Please refresh the page.');
+        return;
+    }
+    
     priceChart = new Chart(ctx, {
         type: 'line',
         data: {
