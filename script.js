@@ -1667,8 +1667,9 @@ function seededNormal(seed, mean, stdDev) {
 }
 
 // Cleanup charts before creating new ones
+// Cleanup charts before creating new ones
 function cleanupCharts() {
-    if (priceChart) {
+    if (priceChart && typeof priceChart.destroy === 'function') {
         try {
             priceChart.destroy();
         } catch (e) {
@@ -1676,7 +1677,7 @@ function cleanupCharts() {
         }
         priceChart = null;
     }
-    if (window.equityChart) {
+    if (window.equityChart && typeof window.equityChart.destroy === 'function') {
         try {
             window.equityChart.destroy();
         } catch (e) {
@@ -1684,7 +1685,7 @@ function cleanupCharts() {
         }
         window.equityChart = null;
     }
-    if (window.walkForwardChart) {
+    if (window.walkForwardChart && typeof window.walkForwardChart.destroy === 'function') {
         try {
             window.walkForwardChart.destroy();
         } catch (e) {
@@ -1692,7 +1693,7 @@ function cleanupCharts() {
         }
         window.walkForwardChart = null;
     }
-    if (window.monteCarloChart) {
+    if (window.monteCarloChart && typeof window.monteCarloChart.destroy === 'function') {
         try {
             window.monteCarloChart.destroy();
         } catch (e) {
@@ -1700,7 +1701,7 @@ function cleanupCharts() {
         }
         window.monteCarloChart = null;
     }
-    if (window.portfolioChart) {
+    if (window.portfolioChart && typeof window.portfolioChart.destroy === 'function') {
         try {
             window.portfolioChart.destroy();
         } catch (e) {
@@ -1708,14 +1709,14 @@ function cleanupCharts() {
         }
         window.portfolioChart = null;
     }
-    if (window.optimizationChart) {
+    if (window.optimizationChart && typeof window.optimizationChart.destroy === 'function') {
         try {
             window.optimizationChart.destroy();
         } catch (e) {
             console.warn('Error destroying optimization chart:', e);
         }
-        window.optimizationChart = null;
     }
+    window.optimizationChart = null;
 }
 
 function createChart(dates, actual, deterministic, stochastic, ticker, 
@@ -1740,7 +1741,7 @@ function createChart(dates, actual, deterministic, stochastic, ticker,
         return;
     }
     
-    if (priceChart) {
+    if (priceChart && typeof priceChart.destroy === 'function') {
         try {
             priceChart.destroy();
         } catch (e) {
@@ -2747,7 +2748,7 @@ function createEquityChart(equity, dates) {
         return;
     }
     
-    if (equityChart) {
+    if (equityChart && typeof equityChart.destroy === 'function') {
         try {
             equityChart.destroy();
         } catch (e) {
@@ -3176,7 +3177,7 @@ function createWalkForwardChart(results) {
         return;
     }
     
-    if (window.walkForwardChart) {
+    if (window.walkForwardChart && typeof window.walkForwardChart.destroy === 'function') {
         try {
             window.walkForwardChart.destroy();
         } catch (e) {
@@ -3351,7 +3352,7 @@ function createMonteCarloChart(results) {
         return;
     }
     
-    if (window.monteCarloChart) {
+    if (window.monteCarloChart && typeof window.monteCarloChart.destroy === 'function') {
         try {
             window.monteCarloChart.destroy();
         } catch (e) {
@@ -3658,7 +3659,7 @@ function createPortfolioChart(results) {
         return;
     }
     
-    if (window.portfolioChart) {
+    if (window.portfolioChart && typeof window.portfolioChart.destroy === 'function') {
         try {
             window.portfolioChart.destroy();
         } catch (e) {
@@ -3807,13 +3808,14 @@ function createOptimizationChart(optimization) {
         return;
     }
     
-    if (window.optimizationChart) {
+    if (window.optimizationChart && typeof window.optimizationChart.destroy === 'function') {
         try {
             window.optimizationChart.destroy();
         } catch (e) {
             console.warn('Error destroying existing optimization chart:', e);
         }
     }
+    window.optimizationChart = null;
     
     const sharpeValues = optimization.allResults.map(r => r.sharpe);
     const labels = optimization.allResults.map((r, i) => `Config ${i + 1}`);
@@ -3884,29 +3886,53 @@ function stopRealtimeUpdates() {
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     stopRealtimeUpdates();
-    // Clean up charts
-    if (priceChart) {
-        priceChart.destroy();
+    // Clean up charts with proper type checking
+    if (priceChart && typeof priceChart.destroy === 'function') {
+        try {
+            priceChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying price chart on unload:', e);
+        }
         priceChart = null;
     }
-    if (window.equityChart) {
-        window.equityChart.destroy();
+    if (window.equityChart && typeof window.equityChart.destroy === 'function') {
+        try {
+            window.equityChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying equity chart on unload:', e);
+        }
         window.equityChart = null;
     }
-    if (window.walkForwardChart) {
-        window.walkForwardChart.destroy();
+    if (window.walkForwardChart && typeof window.walkForwardChart.destroy === 'function') {
+        try {
+            window.walkForwardChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying walk-forward chart on unload:', e);
+        }
         window.walkForwardChart = null;
     }
-    if (window.monteCarloChart) {
-        window.monteCarloChart.destroy();
+    if (window.monteCarloChart && typeof window.monteCarloChart.destroy === 'function') {
+        try {
+            window.monteCarloChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying Monte Carlo chart on unload:', e);
+        }
         window.monteCarloChart = null;
     }
-    if (window.portfolioChart) {
-        window.portfolioChart.destroy();
+    if (window.portfolioChart && typeof window.portfolioChart.destroy === 'function') {
+        try {
+            window.portfolioChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying portfolio chart on unload:', e);
+        }
         window.portfolioChart = null;
     }
-    if (window.optimizationChart) {
-        window.optimizationChart.destroy();
+    if (window.optimizationChart && typeof window.optimizationChart.destroy === 'function') {
+        try {
+            window.optimizationChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying optimization chart on unload:', e);
+        }
         window.optimizationChart = null;
     }
 });
