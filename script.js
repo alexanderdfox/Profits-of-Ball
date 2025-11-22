@@ -27,14 +27,18 @@ if (window.location.protocol === 'file:') {
     });
 }
 
-// Settings toggle
-document.getElementById('settingsToggle').addEventListener('click', () => {
-    const settings = document.getElementById('advancedSettings');
-    settings.classList.toggle('hidden');
-    const btn = document.getElementById('settingsToggle');
-    btn.textContent = settings.classList.contains('hidden') ? 
-        '⚙️ Advanced Settings' : '❌ Close Settings';
-});
+// Settings toggle - with null check
+const settingsToggleBtn = document.getElementById('settingsToggle');
+if (settingsToggleBtn) {
+    settingsToggleBtn.addEventListener('click', () => {
+        const settings = document.getElementById('advancedSettings');
+        if (settings) {
+            settings.classList.toggle('hidden');
+            settingsToggleBtn.textContent = settings.classList.contains('hidden') ? 
+                '⚙️ Advanced Settings' : '❌ Close Settings';
+        }
+    });
+}
 
 // Load saved settings from localStorage
 function loadSettings() {
@@ -47,31 +51,55 @@ function loadSettings() {
     });
 }
 
-// Save settings to localStorage
-document.getElementById('saveSettings').addEventListener('click', () => {
-    const settings = {};
-    const inputs = document.querySelectorAll('#advancedSettings input, #advancedSettings select');
-    inputs.forEach(input => {
-        if (input.id) {
-            settings[input.id] = input.type === 'number' ? parseFloat(input.value) : input.value;
+// Save settings to localStorage - with null check
+const saveSettingsBtn = document.getElementById('saveSettings');
+if (saveSettingsBtn) {
+    saveSettingsBtn.addEventListener('click', () => {
+        try {
+            const settings = {};
+            const inputs = document.querySelectorAll('#advancedSettings input, #advancedSettings select');
+            inputs.forEach(input => {
+                if (input && input.id) {
+                    const value = input.type === 'number' ? parseFloat(input.value) : input.value;
+                    if (value !== null && value !== undefined && !isNaN(value) || input.type !== 'number') {
+                        settings[input.id] = value;
+                    }
+                }
+            });
+            localStorage.setItem('stockCalcSettings', JSON.stringify(settings));
+            alert('Settings saved!');
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            alert('Error saving settings. Please try again.');
         }
     });
-    localStorage.setItem('stockCalcSettings', JSON.stringify(settings));
-    alert('Settings saved!');
-});
+}
 
-// Reset to defaults
-document.getElementById('resetSettings').addEventListener('click', () => {
-    if (confirm('Reset all settings to defaults?')) {
-        localStorage.removeItem('stockCalcSettings');
-        location.reload();
-    }
-});
+// Reset to defaults - with null check
+const resetSettingsBtn = document.getElementById('resetSettings');
+if (resetSettingsBtn) {
+    resetSettingsBtn.addEventListener('click', () => {
+        if (confirm('Reset all settings to defaults?')) {
+            try {
+                localStorage.removeItem('stockCalcSettings');
+                location.reload();
+            } catch (error) {
+                console.error('Error resetting settings:', error);
+                alert('Error resetting settings. Please refresh the page manually.');
+            }
+        }
+    });
+}
 
 // Load settings on page load
 loadSettings();
 
-document.getElementById('analyzeBtn').addEventListener('click', async () => {
+// Analyze button - with null check and error handling
+const analyzeBtn = document.getElementById('analyzeBtn');
+if (!analyzeBtn) {
+    console.error('Analyze button not found!');
+} else {
+    analyzeBtn.addEventListener('click', async () => {
     const ticker = document.getElementById('ticker').value.trim().toUpperCase();
     const startDate = document.getElementById('startDate').value;
     const endDate = document.getElementById('endDate').value;
@@ -100,7 +128,8 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         const enablePortfolio = document.getElementById('enablePortfolio') ? document.getElementById('enablePortfolio').checked : false;
         const portfolioTickers = enablePortfolio && document.getElementById('portfolioTickers') ? 
             document.getElementById('portfolioTickers').value.split(',').map(t => t.trim().toUpperCase()).filter(t => t) : [];
-        const enableOptimization = document.getElementById('enableOptimization') ? document.getElementById('enableOptimization').checked : false;
+        const enableOptimizationEl = document.getElementById('enableOptimization');
+        const enableOptimization = enableOptimizationEl ? enableOptimizationEl.checked : false;
         const enableRealtime = document.getElementById('enableRealtime') ? document.getElementById('enableRealtime').checked : false;
         
         // Show/hide portfolio inputs
@@ -127,12 +156,24 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
             throw new Error('No data found for this ticker and date range');
         }
         
-        const forecastMonths = parseInt(document.getElementById('forecastMonths').value) || 0;
-        const buyPrice = parseFloat(document.getElementById('buyPrice').value);
-        const numShares = parseInt(document.getElementById('numShares').value) || 1;
-        const riskPercent = parseFloat(document.getElementById('riskPercent').value) || 2;
-        const stopLossPercent = parseFloat(document.getElementById('stopLossPercent').value) || 5;
-        const takeProfitPercent = parseFloat(document.getElementById('takeProfitPercent').value) || 10;
+        // Validate and parse input values with proper error handling
+        const forecastMonthsEl = document.getElementById('forecastMonths');
+        const forecastMonths = forecastMonthsEl ? Math.max(0, Math.min(24, parseInt(forecastMonthsEl.value) || 0)) : 0;
+        
+        const buyPriceEl = document.getElementById('buyPrice');
+        const buyPrice = buyPriceEl && buyPriceEl.value ? Math.max(0, parseFloat(buyPriceEl.value)) : null;
+        
+        const numSharesEl = document.getElementById('numShares');
+        const numShares = numSharesEl ? Math.max(1, parseInt(numSharesEl.value) || 1) : 1;
+        
+        const riskPercentEl = document.getElementById('riskPercent');
+        const riskPercent = riskPercentEl ? Math.max(0.1, Math.min(10, parseFloat(riskPercentEl.value) || 2)) : 2;
+        
+        const stopLossPercentEl = document.getElementById('stopLossPercent');
+        const stopLossPercent = stopLossPercentEl ? Math.max(1, Math.min(20, parseFloat(stopLossPercentEl.value) || 5)) : 5;
+        
+        const takeProfitPercentEl = document.getElementById('takeProfitPercent');
+        const takeProfitPercent = takeProfitPercentEl ? Math.max(1, Math.min(50, parseFloat(takeProfitPercentEl.value) || 10)) : 10;
         
         // Get customizable parameters
         const params = getAnalysisParameters();
@@ -140,8 +181,19 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         // Strategy optimization if enabled
         let optimizedParams = params;
         if (enableOptimization) {
-            optimizedParams = await optimizeStrategy(data, ticker, params, startDate, endDate, timeframe);
-            displayOptimizationResults(optimizedParams, params);
+            try {
+                optimizedParams = await optimizeStrategy(data, ticker, params, startDate, endDate, timeframe);
+                if (optimizedParams && optimizedParams.optimalParams) {
+                    displayOptimizationResults(optimizedParams, params);
+                } else {
+                    console.warn('Optimization returned invalid results, using default parameters');
+                    optimizedParams = params;
+                }
+            } catch (error) {
+                console.error('Optimization failed:', error);
+                showError('Strategy optimization failed. Using default parameters.');
+                optimizedParams = params;
+            }
         }
         
         const analysisResults = analyzeStock(data, ticker, forecastMonths, buyPrice, numShares, riskPercent, stopLossPercent, takeProfitPercent, optimizedParams, enableBacktest, backtestMode, timeframe, enablePortfolio ? portfolioData : null);
@@ -154,7 +206,12 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         
         // Real-time updates if enabled
         if (enableRealtime) {
-            startRealtimeUpdates(ticker, timeframe);
+            try {
+                startRealtimeUpdates(ticker, timeframe);
+            } catch (error) {
+                console.error('Failed to start real-time updates:', error);
+                // Don't throw - real-time is optional
+            }
         }
         
         // Store results for export
@@ -162,32 +219,58 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         document.getElementById('loading').classList.add('hidden');
         document.getElementById('results').classList.remove('hidden');
     } catch (error) {
-        document.getElementById('loading').classList.add('hidden');
-        showError(error.message);
+        const loadingEl = document.getElementById('loading');
+        if (loadingEl) loadingEl.classList.add('hidden');
+        
+        const errorMsg = error && error.message ? error.message : 'An unexpected error occurred. Please try again.';
+        showError(errorMsg);
+        console.error('Analysis error:', error);
     }
-});
+    });
+}
 
 function getAnalysisParameters() {
+    // Safe parameter extraction with validation and defaults
+    const getFloat = (id, defaultVal, min = null, max = null) => {
+        const el = document.getElementById(id);
+        if (!el) return defaultVal;
+        const val = parseFloat(el.value);
+        if (isNaN(val)) return defaultVal;
+        if (min !== null && val < min) return min;
+        if (max !== null && val > max) return max;
+        return val;
+    };
+    
+    const getInt = (id, defaultVal, min = null, max = null) => {
+        const el = document.getElementById(id);
+        if (!el) return defaultVal;
+        const val = parseInt(el.value);
+        if (isNaN(val)) return defaultVal;
+        if (min !== null && val < min) return min;
+        if (max !== null && val > max) return max;
+        return val;
+    };
+    
     return {
-        volDecay: parseFloat(document.getElementById('volDecay').value) || 0.9,
-        momentumFactor: parseFloat(document.getElementById('momentumFactor').value) || 0.3,
-        energyBarrierFactor: parseFloat(document.getElementById('energyBarrierFactor').value) || 0.01,
-        demonEfficiencyAdjust: parseFloat(document.getElementById('demonEfficiencyAdjust').value) || 1.0,
-        rsiPeriod: parseInt(document.getElementById('rsiPeriod').value) || 14,
-        macdFast: parseInt(document.getElementById('macdFast').value) || 12,
-        macdSlow: parseInt(document.getElementById('macdSlow').value) || 26,
-        sma20Period: parseInt(document.getElementById('sma20Period').value) || 20,
-        sma50Period: parseInt(document.getElementById('sma50Period').value) || 50,
-        rsiOversold: parseInt(document.getElementById('rsiOversold').value) || 30,
-        rsiOverbought: parseInt(document.getElementById('rsiOverbought').value) || 70,
-        signalBuyThreshold: parseFloat(document.getElementById('signalBuyThreshold').value) || 1,
-        signalStrongBuyThreshold: parseFloat(document.getElementById('signalStrongBuyThreshold').value) || 2,
-        signalRsiWeight: parseFloat(document.getElementById('signalRsiWeight').value) || 1,
-        signalMacdWeight: parseFloat(document.getElementById('signalMacdWeight').value) || 1,
-        signalMaWeight: parseFloat(document.getElementById('signalMaWeight').value) || 1.5,
-        signalTrendWeight: parseFloat(document.getElementById('signalTrendWeight').value) || 1,
-        entropyBins: parseInt(document.getElementById('entropyBins').value) || 10,
-        informationFlowWindow: parseInt(document.getElementById('informationFlowWindow').value) || 6
+        volDecay: getFloat('volDecay', 0.9, 0.5, 0.99),
+        momentumFactor: getFloat('momentumFactor', 0.3, 0, 1),
+        energyBarrierFactor: getFloat('energyBarrierFactor', 0.01, 0.001, 0.1),
+        demonEfficiencyAdjust: getFloat('demonEfficiencyAdjust', 1.0, 0.5, 2.0),
+        rsiPeriod: getInt('rsiPeriod', 14, 5, 30),
+        macdFast: getInt('macdFast', 12, 5, 30),
+        macdSlow: getInt('macdSlow', 26, 10, 50),
+        sma20Period: getInt('sma20Period', 20, 5, 60),
+        sma50Period: getInt('sma50Period', 50, 20, 120),
+        rsiOversold: getInt('rsiOversold', 30, 10, 40),
+        rsiOverbought: getInt('rsiOverbought', 70, 60, 90),
+        signalBuyThreshold: getFloat('signalBuyThreshold', 1, 0.5, 5),
+        signalStrongBuyThreshold: getFloat('signalStrongBuyThreshold', 2, 1, 10),
+        signalRsiWeight: getFloat('signalRsiWeight', 1, 0, 3),
+        signalMacdWeight: getFloat('signalMacdWeight', 1, 0, 3),
+        signalMaWeight: getFloat('signalMaWeight', 1.5, 0, 3),
+        signalTrendWeight: getFloat('signalTrendWeight', 1, 0, 3),
+        entropyBins: getInt('entropyBins', 10, 5, 20),
+        informationFlowWindow: getInt('informationFlowWindow', 6, 3, 12)
     };
 }
 
@@ -510,14 +593,32 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         throw new Error('Insufficient data for analysis');
     }
 
-    // Extract monthly close prices
-    const monthly = data.map(d => d.close);
-    const dates = data.map(d => d.date);
+    // Extract monthly close prices with validation
+    const monthly = [];
+    const dates = [];
+    
+    for (const item of data) {
+        if (item && item.close !== null && item.close !== undefined && !isNaN(item.close) && item.close > 0) {
+            if (item.date instanceof Date || (item.date && !isNaN(new Date(item.date).getTime()))) {
+                monthly.push(parseFloat(item.close));
+                dates.push(item.date instanceof Date ? item.date : new Date(item.date));
+            }
+        }
+    }
+    
+    if (monthly.length < 2) {
+        throw new Error('Insufficient valid data points after filtering. Need at least 2 valid price points.');
+    }
 
-    // Calculate monthly changes ΔS_t
+    // Calculate monthly changes ΔS_t with validation
     const delta_S = [0];
     for (let i = 1; i < monthly.length; i++) {
-        delta_S.push(monthly[i] - monthly[i - 1]);
+        const change = monthly[i] - monthly[i - 1];
+        if (!isNaN(change) && isFinite(change)) {
+            delta_S.push(change);
+        } else {
+            delta_S.push(0); // Fallback for invalid changes
+        }
     }
 
     // Maxwell Demon Model: Rigorous Information-Theoretic and Thermodynamic Analysis
@@ -711,13 +812,20 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         finalPredictedPrice = predictedPrices[predictedPrices.length - 1];
     }
 
-    // Update statistics (including Maxwell Demon metrics)
-    document.getElementById('startingPrice').textContent = `$${S0.toFixed(2)}`;
-    document.getElementById('avgChange').textContent = `$${avg_change.toFixed(2)}`;
-    document.getElementById('stdDev').textContent = `$${delta_U_std.toFixed(2)}`;
-    document.getElementById('finalActual').textContent = `$${monthly[monthly.length - 1].toFixed(2)}`;
-    document.getElementById('finalDet').textContent = `$${sim_prices_det[sim_prices_det.length - 1].toFixed(2)}`;
-    document.getElementById('finalStoch').textContent = `$${sim_prices_stoch[sim_prices_stoch.length - 1].toFixed(2)}`;
+    // Update statistics (including Maxwell Demon metrics) - with null checks
+    const updateStat = (id, value) => {
+        const el = document.getElementById(id);
+        if (el && value !== null && value !== undefined && !isNaN(value)) {
+            el.textContent = value;
+        }
+    };
+    
+    updateStat('startingPrice', `$${S0.toFixed(2)}`);
+    updateStat('avgChange', `$${avg_change.toFixed(2)}`);
+    updateStat('stdDev', `$${delta_U_std.toFixed(2)}`);
+    updateStat('finalActual', `$${monthly[monthly.length - 1].toFixed(2)}`);
+    updateStat('finalDet', `$${sim_prices_det[sim_prices_det.length - 1].toFixed(2)}`);
+    updateStat('finalStoch', `$${sim_prices_stoch[sim_prices_stoch.length - 1].toFixed(2)}`);
     
     // Use rigorous Maxwell Demon metrics already calculated
     const demonEff = window.maxwellDemonMetrics ? window.maxwellDemonMetrics.demonEfficiency : 0.5;
@@ -746,18 +854,30 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         document.getElementById('temperatureValue').title = 'Market Temperature: Volatility measure';
     }
     
-    // Show/hide prediction card
+    // Show/hide prediction card - with null checks
     const predictionCard = document.getElementById('predictionCard');
-    if (forecastMonths > 0 && finalPredictedPrice) {
-        predictionCard.style.display = 'block';
-        document.getElementById('predictedPrice').textContent = `$${finalPredictedPrice.toFixed(2)}`;
-        document.getElementById('predictedPrice').title = `After ${forecastMonths} month(s)`;
-    } else {
-        predictionCard.style.display = 'none';
+    if (predictionCard) {
+        if (forecastMonths > 0 && finalPredictedPrice && !isNaN(finalPredictedPrice)) {
+            predictionCard.style.display = 'block';
+            const predictedPriceEl = document.getElementById('predictedPrice');
+            if (predictedPriceEl) {
+                predictedPriceEl.textContent = `$${finalPredictedPrice.toFixed(2)}`;
+                predictedPriceEl.title = `After ${forecastMonths} month(s)`;
+            }
+        } else {
+            predictionCard.style.display = 'none';
+        }
     }
 
-    // Calculate and display profit if buy price is provided
-    calculateProfit(buyPrice, numShares, monthly[monthly.length - 1], finalPredictedPrice, forecastMonths);
+    // Calculate and display profit if buy price is provided - with validation
+    if (buyPrice && buyPrice > 0 && numShares > 0) {
+        try {
+            calculateProfit(buyPrice, numShares, monthly[monthly.length - 1], finalPredictedPrice, forecastMonths);
+        } catch (error) {
+            console.error('Error calculating profit:', error);
+            // Don't throw - profit calculation is optional
+        }
+    }
 
     // Calculate technical indicators with customizable parameters
     const technicalIndicators = calculateTechnicalIndicators(monthly, dates, params);
@@ -780,27 +900,49 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
     const currentPrice = monthly[monthly.length - 1];
     calculateRiskManagement(currentPrice, buyPrice, riskPercent, stopLossPercent, takeProfitPercent, numShares);
     
-    // Backtesting if enabled
+    // Backtesting if enabled - with error handling
     let backtestResults = null;
-    if (enableBacktest && signals && signals.overall !== 'HOLD') {
-        if (backtestMode === 'walkforward') {
-            backtestResults = performWalkForwardAnalysis(monthly, dates, technicalIndicators, signals, buyPrice || currentPrice, stopLossPercent, takeProfitPercent, params);
-            displayWalkForwardResults(backtestResults);
-        } else if (backtestMode === 'montecarlo') {
-            backtestResults = performMonteCarloSimulation(monthly, dates, technicalIndicators, signals, buyPrice || currentPrice, stopLossPercent, takeProfitPercent, params);
-            displayMonteCarloResults(backtestResults);
-        } else {
-            backtestResults = performBacktesting(monthly, dates, technicalIndicators, signals, buyPrice || currentPrice, stopLossPercent, takeProfitPercent);
-            if (backtestResults) {
-                displayBacktestResults(backtestResults);
+    if (enableBacktest && signals && signals.overall && signals.overall !== 'HOLD') {
+        try {
+            const entryPrice = buyPrice && buyPrice > 0 ? buyPrice : currentPrice;
+            
+            if (backtestMode === 'walkforward') {
+                backtestResults = performWalkForwardAnalysis(monthly, dates, technicalIndicators, signals, entryPrice, stopLossPercent, takeProfitPercent, params);
+                if (backtestResults) {
+                    displayWalkForwardResults(backtestResults);
+                }
+            } else if (backtestMode === 'montecarlo') {
+                backtestResults = performMonteCarloSimulation(monthly, dates, technicalIndicators, signals, entryPrice, stopLossPercent, takeProfitPercent, params);
+                if (backtestResults) {
+                    displayMonteCarloResults(backtestResults);
+                }
             } else {
-                document.getElementById('backtestSection').classList.add('hidden');
+                backtestResults = performBacktesting(monthly, dates, technicalIndicators, signals, entryPrice, stopLossPercent, takeProfitPercent);
+                if (backtestResults) {
+                    displayBacktestResults(backtestResults);
+                } else {
+                    const backtestSection = document.getElementById('backtestSection');
+                    if (backtestSection) backtestSection.classList.add('hidden');
+                }
             }
+        } catch (error) {
+            console.error('Backtesting error:', error);
+            // Hide backtest sections on error
+            const backtestSection = document.getElementById('backtestSection');
+            const walkforwardSection = document.getElementById('walkforwardSection');
+            const montecarloSection = document.getElementById('montecarloSection');
+            if (backtestSection) backtestSection.classList.add('hidden');
+            if (walkforwardSection) walkforwardSection.classList.add('hidden');
+            if (montecarloSection) montecarloSection.classList.add('hidden');
         }
     } else {
-        document.getElementById('backtestSection').classList.add('hidden');
-        document.getElementById('walkforwardSection').classList.add('hidden');
-        document.getElementById('montecarloSection').classList.add('hidden');
+        // Hide all backtest sections
+        const backtestSection = document.getElementById('backtestSection');
+        const walkforwardSection = document.getElementById('walkforwardSection');
+        const montecarloSection = document.getElementById('montecarloSection');
+        if (backtestSection) backtestSection.classList.add('hidden');
+        if (walkforwardSection) walkforwardSection.classList.add('hidden');
+        if (montecarloSection) montecarloSection.classList.add('hidden');
     }
     
     // Return analysis results for export
@@ -1323,22 +1465,26 @@ function generateTradingSignals(indicators, prices, params = {}) {
         }
     }
     
-    // Trend strength signals
-    if (indicators.trend.direction === 'Bullish' && indicators.trend.strength > 50) {
-        signals.push({ type: 'BUY', source: 'Strong Uptrend', strength: signalTrendWeight });
-        signalStrength += signalTrendWeight;
-    } else if (indicators.trend.direction === 'Bearish' && indicators.trend.strength > 50) {
-        signals.push({ type: 'SELL', source: 'Strong Downtrend', strength: signalTrendWeight });
-        signalStrength -= signalTrendWeight;
+    // Trend strength signals - with null checks
+    if (indicators.trend && indicators.trend.direction && indicators.trend.strength !== null && indicators.trend.strength !== undefined) {
+        if (indicators.trend.direction === 'Bullish' && indicators.trend.strength > 50) {
+            signals.push({ type: 'BUY', source: 'Strong Uptrend', strength: signalTrendWeight });
+            signalStrength += signalTrendWeight;
+        } else if (indicators.trend.direction === 'Bearish' && indicators.trend.strength > 50) {
+            signals.push({ type: 'SELL', source: 'Strong Downtrend', strength: signalTrendWeight });
+            signalStrength -= signalTrendWeight;
+        }
     }
     
-    // Support/Resistance signals
-    if (indicators.supportResistance.position === 'Near Support') {
-        signals.push({ type: 'BUY', source: 'Support Level', strength: 0.5 });
-        signalStrength += 0.5;
-    } else if (indicators.supportResistance.position === 'Near Resistance') {
-        signals.push({ type: 'SELL', source: 'Resistance Level', strength: 0.5 });
-        signalStrength -= 0.5;
+    // Support/Resistance signals - with null checks
+    if (indicators.supportResistance && indicators.supportResistance.position) {
+        if (indicators.supportResistance.position === 'Near Support') {
+            signals.push({ type: 'BUY', source: 'Support Level', strength: 0.5 });
+            signalStrength += 0.5;
+        } else if (indicators.supportResistance.position === 'Near Resistance') {
+            signals.push({ type: 'SELL', source: 'Resistance Level', strength: 0.5 });
+            signalStrength -= 0.5;
+        }
     }
     
     // Determine overall signal using customizable thresholds
@@ -1356,44 +1502,70 @@ function generateTradingSignals(indicators, prices, params = {}) {
 }
 
 function displayTradingSignals(signals, indicators, currentPrice) {
-    // Current Signal
+    if (!signals || !indicators) {
+        console.warn('Invalid signals or indicators for display');
+        return;
+    }
+    
+    // Current Signal - with null checks
     const signalEl = document.getElementById('signalValue');
     const strengthEl = document.getElementById('signalStrength');
     
+    if (!signalEl || !strengthEl) {
+        console.warn('Signal display elements not found');
+        return;
+    }
+    
     signalEl.className = 'signal-value';
-    if (signals.overall.includes('BUY')) {
+    const overallSignal = signals.overall || 'HOLD';
+    
+    if (overallSignal.includes('BUY')) {
         signalEl.classList.add('signal-buy');
-        signalEl.textContent = signals.overall;
-    } else if (signals.overall.includes('SELL')) {
+        signalEl.textContent = overallSignal;
+    } else if (overallSignal.includes('SELL')) {
         signalEl.classList.add('signal-sell');
-        signalEl.textContent = signals.overall;
+        signalEl.textContent = overallSignal;
     } else {
         signalEl.classList.add('signal-hold');
-        signalEl.textContent = signals.overall;
+        signalEl.textContent = overallSignal;
     }
     
-    const strengthPercent = Math.min((signals.strength / 5) * 100, 100);
-    strengthEl.textContent = `Strength: ${strengthPercent.toFixed(0)}%`;
+    if (signals.strength !== null && signals.strength !== undefined && !isNaN(signals.strength)) {
+        const strengthPercent = Math.min((signals.strength / 5) * 100, 100);
+        strengthEl.textContent = `Strength: ${strengthPercent.toFixed(0)}%`;
+    } else {
+        strengthEl.textContent = 'Strength: 0%';
+    }
     strengthEl.className = 'signal-strength';
     
-    // RSI
-    if (indicators.rsi !== null) {
-        document.getElementById('rsiValue').textContent = indicators.rsi.toFixed(2);
-        let rsiInterp = 'Neutral';
-        const rsiOversold = (indicators.params && indicators.params.rsiOversold) || 30;
-        const rsiOverbought = (indicators.params && indicators.params.rsiOverbought) || 70;
-        if (indicators.rsi < rsiOversold) rsiInterp = 'Oversold (Buy Signal)';
-        else if (indicators.rsi > rsiOverbought) rsiInterp = 'Overbought (Sell Signal)';
-        else if (indicators.rsi < 50) rsiInterp = 'Bearish';
-        else rsiInterp = 'Bullish';
-        document.getElementById('rsiInterpretation').textContent = rsiInterp;
+    // RSI - with null checks
+    if (indicators.rsi !== null && indicators.rsi !== undefined && !isNaN(indicators.rsi)) {
+        const rsiValueEl = document.getElementById('rsiValue');
+        const rsiInterpEl = document.getElementById('rsiInterpretation');
+        
+        if (rsiValueEl) {
+            rsiValueEl.textContent = indicators.rsi.toFixed(2);
+        }
+        
+        if (rsiInterpEl) {
+            let rsiInterp = 'Neutral';
+            const rsiOversold = (indicators.params && indicators.params.rsiOversold) || 30;
+            const rsiOverbought = (indicators.params && indicators.params.rsiOverbought) || 70;
+            if (indicators.rsi < rsiOversold) rsiInterp = 'Oversold (Buy Signal)';
+            else if (indicators.rsi > rsiOverbought) rsiInterp = 'Overbought (Sell Signal)';
+            else if (indicators.rsi < 50) rsiInterp = 'Bearish';
+            else rsiInterp = 'Bullish';
+            rsiInterpEl.textContent = rsiInterp;
+        }
     } else {
-        document.getElementById('rsiValue').textContent = 'N/A';
-        document.getElementById('rsiInterpretation').textContent = 'Insufficient data';
+        const rsiValueEl = document.getElementById('rsiValue');
+        const rsiInterpEl = document.getElementById('rsiInterpretation');
+        if (rsiValueEl) rsiValueEl.textContent = 'N/A';
+        if (rsiInterpEl) rsiInterpEl.textContent = 'Insufficient data';
     }
     
-    // MACD
-    if (indicators.macd !== null) {
+    // MACD - with null checks
+    if (indicators.macd !== null && indicators.macd !== undefined) {
         document.getElementById('macdValue').textContent = indicators.macd.histogram.toFixed(3);
         const macdInterp = indicators.macd.histogram > 0 ? 
             'Bullish (MACD > Signal)' : 'Bearish (MACD < Signal)';
@@ -1404,7 +1576,10 @@ function displayTradingSignals(signals, indicators, currentPrice) {
     }
     
     // Trend Strength
-    document.getElementById('trendStrength').textContent = `${indicators.trend.strength.toFixed(0)}%`;
+    const trendStrengthEl = document.getElementById('trendStrength');
+    if (trendStrengthEl && indicators.trend && indicators.trend.strength !== null && indicators.trend.strength !== undefined && !isNaN(indicators.trend.strength)) {
+        trendStrengthEl.textContent = `${indicators.trend.strength.toFixed(0)}%`;
+    }
     document.getElementById('trendDirection').textContent = indicators.trend.direction;
     
     // Volatility Regime
@@ -1491,14 +1666,86 @@ function seededNormal(seed, mean, stdDev) {
     return z0 * stdDev + mean;
 }
 
+// Cleanup charts before creating new ones
+function cleanupCharts() {
+    if (priceChart) {
+        try {
+            priceChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying price chart:', e);
+        }
+        priceChart = null;
+    }
+    if (window.equityChart) {
+        try {
+            window.equityChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying equity chart:', e);
+        }
+        window.equityChart = null;
+    }
+    if (window.walkForwardChart) {
+        try {
+            window.walkForwardChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying walk-forward chart:', e);
+        }
+        window.walkForwardChart = null;
+    }
+    if (window.monteCarloChart) {
+        try {
+            window.monteCarloChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying Monte Carlo chart:', e);
+        }
+        window.monteCarloChart = null;
+    }
+    if (window.portfolioChart) {
+        try {
+            window.portfolioChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying portfolio chart:', e);
+        }
+        window.portfolioChart = null;
+    }
+    if (window.optimizationChart) {
+        try {
+            window.optimizationChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying optimization chart:', e);
+        }
+        window.optimizationChart = null;
+    }
+}
+
 function createChart(dates, actual, deterministic, stochastic, ticker, 
                     predictedDates = [], predictedPrices = [], 
                     predictedOptimistic = [], predictedPessimistic = [],
                     buyPrice = null, technicalIndicators = null) {
-    const ctx = document.getElementById('priceChart').getContext('2d');
+    const chartEl = document.getElementById('priceChart');
+    if (!chartEl) {
+        console.error('Price chart element not found');
+        return;
+    }
+    
+    const ctx = chartEl.getContext('2d');
+    if (!ctx) {
+        console.error('Could not get chart context');
+        return;
+    }
+    
+    // Validate data
+    if (!dates || !actual || dates.length === 0 || actual.length === 0) {
+        console.error('Invalid chart data');
+        return;
+    }
     
     if (priceChart) {
-        priceChart.destroy();
+        try {
+            priceChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying existing chart:', e);
+        }
     }
 
     // Combine historical and predicted dates
@@ -1874,6 +2121,25 @@ function showBigMoves(dates, delta_U, thresholdValue) {
 }
 
 function showError(message) {
+    if (!message) {
+        message = 'An unexpected error occurred. Please try again.';
+    }
+    
+    const errorEl = document.getElementById('error');
+    if (!errorEl) {
+        console.error('Error element not found. Error message:', message);
+        alert(message);
+        return;
+    }
+    
+    // Format message with line breaks
+    const formattedMessage = message.replace(/\n/g, '<br>');
+    errorEl.innerHTML = formattedMessage;
+    errorEl.classList.remove('hidden');
+    
+    // Scroll to error
+    errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
     const errorDiv = document.getElementById('error');
     // Convert newlines to HTML breaks
     const formattedMessage = message.replace(/\n/g, '<br>');
@@ -2464,10 +2730,29 @@ function displayBacktestResults(results) {
 
 let equityChart = null;
 function createEquityChart(equity, dates) {
-    const ctx = document.getElementById('equityChart').getContext('2d');
+    const chartEl = document.getElementById('equityChart');
+    if (!chartEl) {
+        console.warn('Equity chart element not found');
+        return;
+    }
+    
+    if (!equity || !dates || equity.length === 0 || dates.length === 0) {
+        console.warn('Invalid equity chart data');
+        return;
+    }
+    
+    const ctx = chartEl.getContext('2d');
+    if (!ctx) {
+        console.warn('Could not get equity chart context');
+        return;
+    }
     
     if (equityChart) {
-        equityChart.destroy();
+        try {
+            equityChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying existing equity chart:', e);
+        }
     }
     
     equityChart = new Chart(ctx, {
@@ -2874,10 +3159,29 @@ function displayWalkForwardResults(results) {
 }
 
 function createWalkForwardChart(results) {
-    const ctx = document.getElementById('walkforwardChart').getContext('2d');
+    if (!results || !results.periods || results.periods.length === 0) {
+        console.warn('Invalid walk-forward results');
+        return;
+    }
+    
+    const chartEl = document.getElementById('walkforwardChart');
+    if (!chartEl) {
+        console.warn('Walk-forward chart element not found');
+        return;
+    }
+    
+    const ctx = chartEl.getContext('2d');
+    if (!ctx) {
+        console.warn('Could not get walk-forward chart context');
+        return;
+    }
     
     if (window.walkForwardChart) {
-        window.walkForwardChart.destroy();
+        try {
+            window.walkForwardChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying existing walk-forward chart:', e);
+        }
     }
     
     const labels = results.periods.map((p, i) => `Period ${i + 1}`);
@@ -3030,10 +3334,29 @@ function displayMonteCarloResults(results) {
 }
 
 function createMonteCarloChart(results) {
-    const ctx = document.getElementById('montecarloChart').getContext('2d');
+    if (!results || !results.simulations || results.simulations.length === 0) {
+        console.warn('Invalid Monte Carlo results');
+        return;
+    }
+    
+    const chartEl = document.getElementById('montecarloChart');
+    if (!chartEl) {
+        console.warn('Monte Carlo chart element not found');
+        return;
+    }
+    
+    const ctx = chartEl.getContext('2d');
+    if (!ctx) {
+        console.warn('Could not get Monte Carlo chart context');
+        return;
+    }
     
     if (window.monteCarloChart) {
-        window.monteCarloChart.destroy();
+        try {
+            window.monteCarloChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying existing Monte Carlo chart:', e);
+        }
     }
     
     // Sample paths for visualization (show first 50)
@@ -3318,10 +3641,29 @@ function displayCorrelationMatrix(correlations, tickers) {
 }
 
 function createPortfolioChart(results) {
-    const ctx = document.getElementById('portfolioChart').getContext('2d');
+    if (!results || !results.tickers || results.tickers.length === 0) {
+        console.warn('Invalid portfolio results');
+        return;
+    }
+    
+    const chartEl = document.getElementById('portfolioChart');
+    if (!chartEl) {
+        console.warn('Portfolio chart element not found');
+        return;
+    }
+    
+    const ctx = chartEl.getContext('2d');
+    if (!ctx) {
+        console.warn('Could not get portfolio chart context');
+        return;
+    }
     
     if (window.portfolioChart) {
-        window.portfolioChart.destroy();
+        try {
+            window.portfolioChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying existing portfolio chart:', e);
+        }
     }
     
     window.portfolioChart = new Chart(ctx, {
@@ -3448,10 +3790,29 @@ function displayOptimizationResults(optimization, baseParams) {
 }
 
 function createOptimizationChart(optimization) {
-    const ctx = document.getElementById('optimizationChart').getContext('2d');
+    if (!optimization || !optimization.allResults || optimization.allResults.length === 0) {
+        console.warn('Invalid optimization results');
+        return;
+    }
+    
+    const chartEl = document.getElementById('optimizationChart');
+    if (!chartEl) {
+        console.warn('Optimization chart element not found');
+        return;
+    }
+    
+    const ctx = chartEl.getContext('2d');
+    if (!ctx) {
+        console.warn('Could not get optimization chart context');
+        return;
+    }
     
     if (window.optimizationChart) {
-        window.optimizationChart.destroy();
+        try {
+            window.optimizationChart.destroy();
+        } catch (e) {
+            console.warn('Error destroying existing optimization chart:', e);
+        }
     }
     
     const sharpeValues = optimization.allResults.map(r => r.sharpe);
@@ -3482,8 +3843,16 @@ function createOptimizationChart(optimization) {
 let realtimeInterval = null;
 
 function startRealtimeUpdates(ticker, timeframe) {
+    // Clean up any existing interval
     if (realtimeInterval) {
         clearInterval(realtimeInterval);
+        realtimeInterval = null;
+    }
+    
+    // Validate inputs
+    if (!ticker || !timeframe) {
+        console.warn('Invalid parameters for real-time updates');
+        return;
     }
     
     // Update every 60 seconds
@@ -3493,15 +3862,54 @@ function startRealtimeUpdates(ticker, timeframe) {
             const startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             
             const data = await fetchStockData(ticker, startDate, endDate, timeframe);
-            if (data && data.length > 0) {
+            if (data && data.length > 0 && data[data.length - 1] && data[data.length - 1].close) {
                 const currentPrice = data[data.length - 1].close;
                 updateRealtimePrice(ticker, currentPrice);
             }
         } catch (error) {
             console.error('Real-time update error:', error);
+            // Don't stop the interval on single failure
         }
     }, 60000); // 60 seconds
 }
+
+// Cleanup function for real-time updates
+function stopRealtimeUpdates() {
+    if (realtimeInterval) {
+        clearInterval(realtimeInterval);
+        realtimeInterval = null;
+    }
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    stopRealtimeUpdates();
+    // Clean up charts
+    if (priceChart) {
+        priceChart.destroy();
+        priceChart = null;
+    }
+    if (window.equityChart) {
+        window.equityChart.destroy();
+        window.equityChart = null;
+    }
+    if (window.walkForwardChart) {
+        window.walkForwardChart.destroy();
+        window.walkForwardChart = null;
+    }
+    if (window.monteCarloChart) {
+        window.monteCarloChart.destroy();
+        window.monteCarloChart = null;
+    }
+    if (window.portfolioChart) {
+        window.portfolioChart.destroy();
+        window.portfolioChart = null;
+    }
+    if (window.optimizationChart) {
+        window.optimizationChart.destroy();
+        window.optimizationChart = null;
+    }
+});
 
 function updateRealtimePrice(ticker, price) {
     // Update UI with latest price
