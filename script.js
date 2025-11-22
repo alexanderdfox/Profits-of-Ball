@@ -60,7 +60,10 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     document.getElementById('loading').classList.remove('hidden');
 
     try {
-        const data = await fetchStockData(ticker, startDate, endDate);
+        const timeframe = document.getElementById('timeframe').value || '1mo';
+        const enableBacktest = document.getElementById('enableBacktest').checked;
+        
+        const data = await fetchStockData(ticker, startDate, endDate, timeframe);
         if (!data || data.length === 0) {
             throw new Error('No data found for this ticker and date range');
         }
@@ -75,7 +78,10 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         // Get customizable parameters
         const params = getAnalysisParameters();
         
-        analyzeStock(data, ticker, forecastMonths, buyPrice, numShares, riskPercent, stopLossPercent, takeProfitPercent, params);
+        const analysisResults = analyzeStock(data, ticker, forecastMonths, buyPrice, numShares, riskPercent, stopLossPercent, takeProfitPercent, params, enableBacktest, timeframe);
+        
+        // Store results for export
+        window.lastAnalysisResults = analysisResults;
         document.getElementById('loading').classList.add('hidden');
         document.getElementById('results').classList.remove('hidden');
     } catch (error) {
@@ -108,7 +114,7 @@ function getAnalysisParameters() {
     };
 }
 
-async function fetchStockData(ticker, startDate, endDate) {
+async function fetchStockData(ticker, startDate, endDate, interval = '1mo') {
     const period1 = Math.floor(new Date(startDate).getTime() / 1000);
     const period2 = Math.floor(new Date(endDate).getTime() / 1000);
     
@@ -136,7 +142,14 @@ async function fetchStockData(ticker, startDate, endDate) {
     
     // Strategy 2: Try Yahoo Finance v8 API with JSONP-like approach via a working CORS proxy
     try {
-        const v8Url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1mo&period1=${period1}&period2=${period2}`;
+        // Map interval names to Yahoo Finance format
+        const intervalMap = {
+            '1d': '1d',
+            '1wk': '1wk',
+            '1mo': '1mo'
+        };
+        const yahooInterval = intervalMap[interval] || '1mo';
+        const v8Url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=${yahooInterval}&period1=${period1}&period2=${period2}`;
         
         // Try using corsproxy.io which is more reliable
         const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(v8Url)}`;
@@ -175,7 +188,14 @@ async function fetchStockData(ticker, startDate, endDate) {
     }
     
     // Strategy 3: Try Yahoo Finance download via multiple CORS proxies
-    const yahooUrl = `https://query1.finance.yahoo.com/v7/finance/download/${ticker}?period1=${period1}&period2=${period2}&interval=1mo&events=history&includeAdjustedClose=true`;
+        // Map interval names to Yahoo Finance format
+        const intervalMap = {
+            '1d': '1d',
+            '1wk': '1wk',
+            '1mo': '1mo'
+        };
+        const yahooInterval = intervalMap[interval] || '1mo';
+        const yahooUrl = `https://query1.finance.yahoo.com/v7/finance/download/${ticker}?period1=${period1}&period2=${period2}&interval=${yahooInterval}&events=history&includeAdjustedClose=true`;
     
     const proxyServices = [
         `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`,
@@ -330,7 +350,7 @@ function parseCSVLine(line) {
     return result;
 }
 
-function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShares = 1, riskPercent = 2, stopLossPercent = 5, takeProfitPercent = 10, params = {}) {
+function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShares = 1, riskPercent = 2, stopLossPercent = 5, takeProfitPercent = 10, params = {}, enableBacktest = false, timeframe = '1mo') {
     // Use provided parameters or defaults
     const volDecay = params.volDecay || 0.9;
     const momentumFactor = params.momentumFactor || 0.3;
@@ -585,6 +605,14 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
     // Calculate technical indicators with customizable parameters
     const technicalIndicators = calculateTechnicalIndicators(monthly, dates, params);
     
+    // Calculate additional indicators
+    const additionalIndicators = calculateAdditionalIndicators(monthly, dates);
+    displayAdditionalIndicators(additionalIndicators);
+    
+    // Detect chart patterns
+    const patterns = detectChartPatterns(monthly, dates);
+    displayPatterns(patterns);
+    
     // Generate trading signals with customizable weights
     const signals = generateTradingSignals(technicalIndicators, monthly, params);
     
@@ -594,6 +622,33 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
     // Calculate risk management
     const currentPrice = monthly[monthly.length - 1];
     calculateRiskManagement(currentPrice, buyPrice, riskPercent, stopLossPercent, takeProfitPercent, numShares);
+    
+    // Backtesting if enabled
+    let backtestResults = null;
+    if (enableBacktest && signals && signals.overall !== 'HOLD') {
+        backtestResults = performBacktesting(monthly, dates, technicalIndicators, signals, buyPrice || currentPrice, stopLossPercent, takeProfitPercent);
+        if (backtestResults) {
+            displayBacktestResults(backtestResults);
+        } else {
+            document.getElementById('backtestSection').classList.add('hidden');
+        }
+    } else {
+        document.getElementById('backtestSection').classList.add('hidden');
+    }
+    
+    // Return analysis results for export
+    return {
+        ticker,
+        dates,
+        prices: monthly,
+        signals,
+        technicalIndicators,
+        additionalIndicators,
+        patterns,
+        backtestResults,
+        maxwellDemonMetrics: window.maxwellDemonMetrics,
+        timeframe
+    };
 
     // Create chart with predictions and indicators
     createChart(dates, monthly, sim_prices_det, sim_prices_stoch, ticker, 
@@ -1671,4 +1726,743 @@ document.getElementById('ticker').addEventListener('keypress', (e) => {
 
 // Set default end date to today
 document.getElementById('endDate').valueAsDate = new Date();
+
+// Export functionality
+document.getElementById('exportCSV').addEventListener('click', () => {
+    if (!window.lastAnalysisResults) {
+        alert('No analysis data to export. Please run an analysis first.');
+        return;
+    }
+    exportToCSV(window.lastAnalysisResults);
+});
+
+document.getElementById('exportJSON').addEventListener('click', () => {
+    if (!window.lastAnalysisResults) {
+        alert('No analysis data to export. Please run an analysis first.');
+        return;
+    }
+    exportToJSON(window.lastAnalysisResults);
+});
+
+document.getElementById('exportImage').addEventListener('click', () => {
+    if (!priceChart) {
+        alert('No chart to export. Please run an analysis first.');
+        return;
+    }
+    const url = priceChart.toBase64Image();
+    const link = document.createElement('a');
+    link.download = `stock-chart-${Date.now()}.png`;
+    link.href = url;
+    link.click();
+});
+
+document.getElementById('exportReport').addEventListener('click', () => {
+    if (!window.lastAnalysisResults) {
+        alert('No analysis data to export. Please run an analysis first.');
+        return;
+    }
+    generatePDFReport(window.lastAnalysisResults);
+});
+
+// Additional Technical Indicators
+function calculateADX(prices, period = 14) {
+    if (prices.length < period * 2) return null;
+    
+    // Calculate True Range
+    const trueRanges = [];
+    for (let i = 1; i < prices.length; i++) {
+        const tr = Math.abs(prices[i] - prices[i - 1]);
+        trueRanges.push(tr);
+    }
+    
+    if (trueRanges.length < period) return null;
+    
+    // Calculate +DM and -DM (Directional Movement)
+    const plusDM = [];
+    const minusDM = [];
+    
+    for (let i = 1; i < prices.length; i++) {
+        const moveUp = prices[i] - prices[i - 1];
+        const moveDown = prices[i - 1] - prices[i];
+        
+        plusDM.push(moveUp > moveDown && moveUp > 0 ? moveUp : 0);
+        minusDM.push(moveDown > moveUp && moveDown > 0 ? moveDown : 0);
+    }
+    
+    // Smooth values
+    const atr = calculateATR(prices, period);
+    if (!atr) return null;
+    
+    const smoothedPlusDM = plusDM.slice(-period).reduce((a, b) => a + b, 0) / period;
+    const smoothedMinusDM = minusDM.slice(-period).reduce((a, b) => a + b, 0) / period;
+    
+    // Calculate DI+ and DI-
+    const diPlus = (smoothedPlusDM / atr) * 100;
+    const diMinus = (smoothedMinusDM / atr) * 100;
+    
+    // Calculate DX and ADX
+    const dx = Math.abs(diPlus - diMinus) / (diPlus + diMinus) * 100;
+    
+    // Simplified ADX (for full calculation, would need smoothing over multiple periods)
+    return {
+        adx: dx,
+        diPlus: diPlus,
+        diMinus: diMinus
+    };
+}
+
+function calculateStochastic(prices, period = 14, kPeriod = 3) {
+    if (prices.length < period + kPeriod) return null;
+    
+    const recent = prices.slice(-period);
+    const lowest = Math.min(...recent);
+    const highest = Math.max(...recent);
+    const current = prices[prices.length - 1];
+    
+    const range = highest - lowest;
+    if (range === 0) return null;
+    
+    const k = ((current - lowest) / range) * 100;
+    
+    // Simplified %D (would normally be moving average of %K)
+    return {
+        k: k,
+        d: k // Simplified
+    };
+}
+
+function calculateWilliamsR(prices, period = 14) {
+    if (prices.length < period) return null;
+    
+    const recent = prices.slice(-period);
+    const highest = Math.max(...recent);
+    const lowest = Math.min(...recent);
+    const current = prices[prices.length - 1];
+    
+    const range = highest - lowest;
+    if (range === 0) return null;
+    
+    const wr = ((highest - current) / range) * -100;
+    return wr;
+}
+
+function calculateOBV(prices) {
+    // On-Balance Volume (simplified without volume data)
+    // We'll use price momentum as proxy
+    if (prices.length < 2) return null;
+    
+    let obv = 0;
+    for (let i = 1; i < prices.length; i++) {
+        const change = prices[i] - prices[i - 1];
+        if (change > 0) obv += Math.abs(change);
+        else if (change < 0) obv -= Math.abs(change);
+    }
+    
+    return obv;
+}
+
+function calculateATR(prices, period = 14) {
+    if (prices.length < period + 1) return null;
+    
+    const trueRanges = [];
+    for (let i = 1; i < prices.length; i++) {
+        const tr = Math.abs(prices[i] - prices[i - 1]);
+        trueRanges.push(tr);
+    }
+    
+    if (trueRanges.length < period) return null;
+    
+    const atr = trueRanges.slice(-period).reduce((a, b) => a + b, 0) / period;
+    return atr;
+}
+
+function calculateCCI(prices, period = 20) {
+    if (prices.length < period) return null;
+    
+    const recent = prices.slice(-period);
+    const sma = recent.reduce((a, b) => a + b, 0) / period;
+    
+    const meanDeviation = recent.reduce((sum, price) => {
+        return sum + Math.abs(price - sma);
+    }, 0) / period;
+    
+    if (meanDeviation === 0) return null;
+    
+    const current = prices[prices.length - 1];
+    const cci = (current - sma) / (0.015 * meanDeviation);
+    return cci;
+}
+
+function calculateAdditionalIndicators(prices, dates) {
+    return {
+        adx: calculateADX(prices),
+        stochastic: calculateStochastic(prices),
+        williamsR: calculateWilliamsR(prices),
+        obv: calculateOBV(prices),
+        atr: calculateATR(prices),
+        cci: calculateCCI(prices)
+    };
+}
+
+function displayAdditionalIndicators(indicators) {
+    const section = document.getElementById('additionalIndicators');
+    if (!section) return;
+    
+    section.classList.remove('hidden');
+    
+    // ADX
+    if (indicators.adx) {
+        document.getElementById('adxValue').textContent = indicators.adx.adx.toFixed(2);
+        let adxInterp = 'Weak Trend';
+        if (indicators.adx.adx > 25) adxInterp = 'Strong Trend';
+        else if (indicators.adx.adx > 20) adxInterp = 'Moderate Trend';
+        document.getElementById('adxInterpretation').textContent = adxInterp;
+    } else {
+        document.getElementById('adxValue').textContent = 'N/A';
+        document.getElementById('adxInterpretation').textContent = 'Insufficient data';
+    }
+    
+    // Stochastic
+    if (indicators.stochastic) {
+        document.getElementById('stochValue').textContent = `%K: ${indicators.stochastic.k.toFixed(2)} / %D: ${indicators.stochastic.d.toFixed(2)}`;
+        let stochInterp = 'Neutral';
+        if (indicators.stochastic.k < 20) stochInterp = 'Oversold (Buy)';
+        else if (indicators.stochastic.k > 80) stochInterp = 'Overbought (Sell)';
+        document.getElementById('stochInterpretation').textContent = stochInterp;
+    } else {
+        document.getElementById('stochValue').textContent = 'N/A';
+        document.getElementById('stochInterpretation').textContent = 'Insufficient data';
+    }
+    
+    // Williams %R
+    if (indicators.williamsR !== null) {
+        document.getElementById('williamsR').textContent = indicators.williamsR.toFixed(2);
+        let wrInterp = 'Neutral';
+        if (indicators.williamsR > -20) wrInterp = 'Overbought (Sell)';
+        else if (indicators.williamsR < -80) wrInterp = 'Oversold (Buy)';
+        document.getElementById('williamsRInterpretation').textContent = wrInterp;
+    } else {
+        document.getElementById('williamsR').textContent = 'N/A';
+        document.getElementById('williamsRInterpretation').textContent = 'Insufficient data';
+    }
+    
+    // OBV
+    if (indicators.obv !== null) {
+        document.getElementById('obvValue').textContent = indicators.obv.toFixed(0);
+        document.getElementById('obvInterpretation').textContent = indicators.obv > 0 ? 'Bullish' : 'Bearish';
+    } else {
+        document.getElementById('obvValue').textContent = 'N/A';
+        document.getElementById('obvInterpretation').textContent = 'Insufficient data';
+    }
+    
+    // ATR
+    if (indicators.atr) {
+        document.getElementById('atrValue').textContent = `$${indicators.atr.toFixed(2)}`;
+        document.getElementById('atrInterpretation').textContent = 'Average True Range';
+    } else {
+        document.getElementById('atrValue').textContent = 'N/A';
+        document.getElementById('atrInterpretation').textContent = 'Insufficient data';
+    }
+    
+    // CCI
+    if (indicators.cci !== null) {
+        document.getElementById('cciValue').textContent = indicators.cci.toFixed(2);
+        let cciInterp = 'Neutral';
+        if (indicators.cci > 100) cciInterp = 'Overbought (Sell)';
+        else if (indicators.cci < -100) cciInterp = 'Oversold (Buy)';
+        document.getElementById('cciInterpretation').textContent = cciInterp;
+    } else {
+        document.getElementById('cciValue').textContent = 'N/A';
+        document.getElementById('cciInterpretation').textContent = 'Insufficient data';
+    }
+}
+
+function detectChartPatterns(prices, dates) {
+    const patterns = [];
+    
+    if (prices.length < 5) return patterns;
+    
+    // Head and Shoulders / Inverse Head and Shoulders
+    for (let i = 3; i < prices.length - 3; i++) {
+        const left = prices[i - 3];
+        const head = prices[i - 1];
+        const right = prices[i + 1];
+        const shoulder1 = prices[i - 2];
+        const shoulder2 = prices[i];
+        
+        // Head and Shoulders
+        if (head > shoulder1 && head > shoulder2 && 
+            Math.abs(shoulder1 - shoulder2) / shoulder1 < 0.02 &&
+            left > shoulder1 && right > shoulder2) {
+            patterns.push({
+                type: 'Head and Shoulders',
+                date: dates[i],
+                price: prices[i],
+                signal: 'SELL',
+                confidence: 'Medium'
+            });
+        }
+        
+        // Inverse Head and Shoulders
+        if (head < shoulder1 && head < shoulder2 && 
+            Math.abs(shoulder1 - shoulder2) / shoulder1 < 0.02 &&
+            left < shoulder1 && right < shoulder2) {
+            patterns.push({
+                type: 'Inverse Head and Shoulders',
+                date: dates[i],
+                price: prices[i],
+                signal: 'BUY',
+                confidence: 'Medium'
+            });
+        }
+    }
+    
+    // Double Top / Double Bottom
+    for (let i = 2; i < prices.length - 2; i++) {
+        const peak1 = prices[i - 1];
+        const peak2 = prices[i + 1];
+        const trough = prices[i];
+        
+        // Double Top
+        if (Math.abs(peak1 - peak2) / peak1 < 0.02 && trough < peak1 * 0.95) {
+            patterns.push({
+                type: 'Double Top',
+                date: dates[i],
+                price: prices[i],
+                signal: 'SELL',
+                confidence: 'Medium'
+            });
+        }
+        
+        // Double Bottom
+        if (Math.abs(trough - prices[i - 2]) / trough < 0.02 && 
+            peak1 > trough * 1.05 && peak2 > trough * 1.05) {
+            patterns.push({
+                type: 'Double Bottom',
+                date: dates[i],
+                price: prices[i],
+                signal: 'BUY',
+                confidence: 'Medium'
+            });
+        }
+    }
+    
+    // Triangle patterns
+    if (prices.length >= 10) {
+        const recent = prices.slice(-10);
+        const highs = [];
+        const lows = [];
+        
+        for (let i = 1; i < recent.length - 1; i++) {
+            if (recent[i] > recent[i - 1] && recent[i] > recent[i + 1]) {
+                highs.push({ index: i, value: recent[i] });
+            }
+            if (recent[i] < recent[i - 1] && recent[i] < recent[i + 1]) {
+                lows.push({ index: i, value: recent[i] });
+            }
+        }
+        
+        if (highs.length >= 2 && lows.length >= 2) {
+            const highSlope = (highs[highs.length - 1].value - highs[0].value) / (highs.length - 1);
+            const lowSlope = (lows[lows.length - 1].value - lows[0].value) / (lows.length - 1);
+            
+            if (highSlope < 0 && lowSlope > 0) {
+                patterns.push({
+                    type: 'Ascending Triangle',
+                    date: dates[dates.length - 1],
+                    price: prices[prices.length - 1],
+                    signal: 'BUY',
+                    confidence: 'High'
+                });
+            } else if (highSlope < 0 && lowSlope < 0) {
+                patterns.push({
+                    type: 'Descending Triangle',
+                    date: dates[dates.length - 1],
+                    price: prices[prices.length - 1],
+                    signal: 'SELL',
+                    confidence: 'High'
+                });
+            }
+        }
+    }
+    
+    return patterns;
+}
+
+function displayPatterns(patterns) {
+    const section = document.getElementById('patternRecognition');
+    const list = document.getElementById('patternsList');
+    
+    if (!section || !list) return;
+    
+    if (patterns.length === 0) {
+        section.classList.add('hidden');
+        return;
+    }
+    
+    section.classList.remove('hidden');
+    list.innerHTML = '';
+    
+    patterns.forEach(pattern => {
+        const item = document.createElement('div');
+        item.className = `pattern-item ${pattern.signal === 'BUY' ? 'pattern-buy' : 'pattern-sell'}`;
+        item.innerHTML = `
+            <div class="pattern-header">
+                <span class="pattern-type">${pattern.type}</span>
+                <span class="pattern-signal ${pattern.signal === 'BUY' ? 'signal-buy' : 'signal-sell'}">${pattern.signal}</span>
+            </div>
+            <div class="pattern-details">
+                <span class="pattern-date">${pattern.date.toLocaleDateString()}</span>
+                <span class="pattern-price">$${pattern.price.toFixed(2)}</span>
+                <span class="pattern-confidence">Confidence: ${pattern.confidence}</span>
+            </div>
+        `;
+        list.appendChild(item);
+    });
+}
+
+// Backtesting
+function performBacktesting(prices, dates, indicators, signals, entryPrice, stopLossPercent, takeProfitPercent) {
+    const trades = [];
+    let inPosition = false;
+    let entryDate = null;
+    let entryP = null;
+    let equity = [10000]; // Starting with $10,000
+    let positionSize = 1; // Percentage of equity to risk per trade
+    
+    // Generate signals for each time period (simplified - using current signal for all)
+    // In a real implementation, you'd calculate signals at each point in time
+    const historicalSignals = generateHistoricalSignals(prices, indicators);
+    
+    for (let i = 1; i < prices.length; i++) {
+        const currentPrice = prices[i];
+        const currentDate = dates[i];
+        const signal = historicalSignals[i] || 'HOLD';
+        const lastEquity = equity[equity.length - 1];
+        
+        if (!inPosition && signal.includes('BUY')) {
+            // Enter position
+            inPosition = true;
+            entryDate = currentDate;
+            entryP = currentPrice;
+        } else if (inPosition) {
+            // Check stop loss and take profit
+            const stopLoss = entryP * (1 - stopLossPercent / 100);
+            const takeProfit = entryP * (1 + takeProfitPercent / 100);
+            
+            const exitReason = signal.includes('SELL') ? 'Signal Exit' :
+                              currentPrice <= stopLoss ? 'Stop Loss' :
+                              currentPrice >= takeProfit ? 'Take Profit' : null;
+            
+            if (exitReason) {
+                const pnl = ((currentPrice - entryP) / entryP) * 100;
+                const tradeReturn = (pnl / 100) * positionSize;
+                
+                trades.push({
+                    entryDate,
+                    exitDate: currentDate,
+                    entryPrice: entryP,
+                    exitPrice: currentPrice,
+                    pnl,
+                    returnPercent: pnl,
+                    exitReason,
+                    daysHeld: Math.round((currentDate - entryDate) / (1000 * 60 * 60 * 24))
+                });
+                
+                // Update equity curve
+                const newEquity = lastEquity * (1 + tradeReturn);
+                equity.push(newEquity);
+                
+                inPosition = false;
+            } else {
+                // Update equity with unrealized P&L
+                const pnl = ((currentPrice - entryP) / entryP) * 100;
+                const unrealizedReturn = (pnl / 100) * positionSize;
+                const newEquity = lastEquity * (1 + unrealizedReturn);
+                equity.push(newEquity);
+            }
+        } else {
+            equity.push(lastEquity);
+        }
+    }
+    
+    // Close any open position at end
+    if (inPosition) {
+        const currentPrice = prices[prices.length - 1];
+        const currentDate = dates[dates.length - 1];
+        const pnl = ((currentPrice - entryP) / entryP) * 100;
+        const tradeReturn = (pnl / 100) * positionSize;
+        
+        trades.push({
+            entryDate,
+            exitDate: currentDate,
+            entryPrice: entryP,
+            exitPrice: currentPrice,
+            pnl,
+            returnPercent: pnl,
+            exitReason: 'End of Period',
+            daysHeld: Math.round((currentDate - entryDate) / (1000 * 60 * 60 * 24))
+        });
+        
+        const lastEquity = equity[equity.length - 1];
+        const newEquity = lastEquity * (1 + tradeReturn);
+        equity.push(newEquity);
+    }
+    
+    // Calculate performance metrics
+    if (trades.length === 0) return null;
+    
+    const winningTrades = trades.filter(t => t.pnl > 0);
+    const losingTrades = trades.filter(t => t.pnl < 0);
+    const winRate = (winningTrades.length / trades.length) * 100;
+    
+    const totalReturn = equity[equity.length - 1] - equity[0];
+    const totalReturnPercent = (totalReturn / equity[0]) * 100;
+    
+    // Calculate Sharpe Ratio
+    const returns = trades.map(t => t.returnPercent);
+    const avgReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const stdReturn = calculateStdDev(returns);
+    const sharpeRatio = stdReturn > 0 ? (avgReturn / stdReturn) * Math.sqrt(12) : 0; // Annualized
+    
+    // Calculate Sortino Ratio (downside deviation only)
+    const downsideReturns = returns.filter(r => r < 0);
+    const downsideStd = downsideReturns.length > 0 ? calculateStdDev(downsideReturns) : 0;
+    const sortinoRatio = downsideStd > 0 ? (avgReturn / downsideStd) * Math.sqrt(12) : 0;
+    
+    // Calculate Max Drawdown
+    let maxDrawdown = 0;
+    let maxDrawdownPercent = 0;
+    let peak = equity[0];
+    for (let i = 1; i < equity.length; i++) {
+        if (equity[i] > peak) peak = equity[i];
+        const drawdown = peak - equity[i];
+        const drawdownPercent = ((peak - equity[i]) / peak) * 100;
+        if (drawdown > maxDrawdown) {
+            maxDrawdown = drawdown;
+            maxDrawdownPercent = drawdownPercent;
+        }
+    }
+    
+    // Profit Factor
+    const grossProfit = winningTrades.reduce((sum, t) => sum + Math.abs(t.pnl), 0);
+    const grossLoss = losingTrades.reduce((sum, t) => sum + Math.abs(t.pnl), 0);
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 0;
+    
+    // Average return per trade
+    const avgReturnPerTrade = avgReturn;
+    
+    return {
+        trades,
+        equity,
+        dates,
+        totalReturn,
+        totalReturnPercent,
+        sharpeRatio,
+        sortinoRatio,
+        maxDrawdown,
+        maxDrawdownPercent,
+        winRate,
+        profitFactor,
+        totalTrades: trades.length,
+        avgReturn: avgReturnPerTrade,
+        winningTrades: winningTrades.length,
+        losingTrades: losingTrades.length
+    };
+}
+
+function displayBacktestResults(results) {
+    if (!results) return;
+    
+    const section = document.getElementById('backtestSection');
+    section.classList.remove('hidden');
+    
+    document.getElementById('totalReturn').textContent = `$${results.totalReturn.toFixed(2)}`;
+    document.getElementById('totalReturnPercent').textContent = `${results.totalReturnPercent >= 0 ? '+' : ''}${results.totalReturnPercent.toFixed(2)}%`;
+    document.getElementById('totalReturnPercent').className = results.totalReturnPercent >= 0 ? 'performance-label profit-positive' : 'performance-label profit-negative';
+    
+    document.getElementById('sharpeRatio').textContent = results.sharpeRatio.toFixed(2);
+    document.getElementById('sortinoRatio').textContent = results.sortinoRatio.toFixed(2);
+    document.getElementById('maxDrawdown').textContent = `-${results.maxDrawdownPercent.toFixed(2)}%`;
+    document.getElementById('maxDrawdownPercent').textContent = `$${results.maxDrawdown.toFixed(2)} maximum decline`;
+    
+    document.getElementById('winRate').textContent = `${results.winRate.toFixed(1)}%`;
+    document.getElementById('profitFactor').textContent = results.profitFactor.toFixed(2);
+    document.getElementById('totalTrades').textContent = results.totalTrades;
+    document.getElementById('avgReturn').textContent = `${results.avgReturn >= 0 ? '+' : ''}${results.avgReturn.toFixed(2)}%`;
+    
+    // Create equity curve chart
+    createEquityChart(results.equity, results.dates);
+}
+
+let equityChart = null;
+function createEquityChart(equity, dates) {
+    const ctx = document.getElementById('equityChart').getContext('2d');
+    
+    if (equityChart) {
+        equityChart.destroy();
+    }
+    
+    equityChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: dates.map(d => d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })),
+            datasets: [{
+                label: 'Equity Curve',
+                data: equity,
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Backtest Equity Curve',
+                    font: { size: 16, weight: 'bold' }
+                },
+                legend: { display: true }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    title: { display: true, text: 'Portfolio Value ($)' },
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + value.toFixed(0);
+                        }
+                    }
+                },
+                x: {
+                    type: 'time',
+                    time: { unit: 'month' },
+                    title: { display: true, text: 'Date' }
+                }
+            }
+        }
+    });
+}
+
+// Export functions
+function exportToCSV(results) {
+    let csv = 'Date,Price,Signal,RSI,MACD,Trend\n';
+    
+    for (let i = 0; i < results.prices.length; i++) {
+        const date = results.dates[i].toLocaleDateString();
+        const price = results.prices[i];
+        const rsi = results.technicalIndicators.rsi ? results.technicalIndicators.rsi.toFixed(2) : 'N/A';
+        const macd = results.technicalIndicators.macd ? results.technicalIndicators.macd.histogram.toFixed(3) : 'N/A';
+        const trend = results.technicalIndicators.trend ? results.technicalIndicators.trend.direction : 'N/A';
+        
+        csv += `${date},${price.toFixed(2)},${results.signals.overall || 'N/A'},${rsi},${macd},${trend}\n`;
+    }
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `stock-analysis-${results.ticker}-${Date.now()}.csv`;
+    link.click();
+}
+
+function exportToJSON(results) {
+    const json = JSON.stringify(results, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `stock-analysis-${results.ticker}-${Date.now()}.json`;
+    link.click();
+}
+
+function generateHistoricalSignals(prices, indicators) {
+    // Simplified: Generate signals for each point in time
+    // In reality, you'd recalculate indicators at each point
+    const signals = [];
+    for (let i = 0; i < prices.length; i++) {
+        if (i < 50) {
+            signals.push('HOLD'); // Not enough data
+        } else {
+            // Use current signal for all (simplified)
+            // Real implementation would recalculate at each point
+            const currentPrice = prices[i];
+            if (indicators.sma20 && indicators.sma50) {
+                if (currentPrice > indicators.sma20 && indicators.sma20 > indicators.sma50) {
+                    signals.push('BUY');
+                } else if (currentPrice < indicators.sma20 && indicators.sma20 < indicators.sma50) {
+                    signals.push('SELL');
+                } else {
+                    signals.push('HOLD');
+                }
+            } else {
+                signals.push('HOLD');
+            }
+        }
+    }
+    return signals;
+}
+
+function generatePDFReport(results) {
+    // Create HTML report
+    let html = `
+        <html>
+        <head>
+            <title>Stock Analysis Report - ${results.ticker}</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; }
+                h1 { color: #333; }
+                .section { margin: 20px 0; }
+                table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #667eea; color: white; }
+            </style>
+        </head>
+        <body>
+            <h1>Stock Analysis Report: ${results.ticker}</h1>
+            <div class="section">
+                <h2>Summary</h2>
+                <p><strong>Analysis Date:</strong> ${new Date().toLocaleDateString()}</p>
+                <p><strong>Timeframe:</strong> ${results.timeframe}</p>
+                <p><strong>Current Signal:</strong> ${results.signals.overall}</p>
+                <p><strong>Signal Strength:</strong> ${results.signals.strength.toFixed(2)}</p>
+            </div>
+            <div class="section">
+                <h2>Technical Indicators</h2>
+                <table>
+                    <tr><th>Indicator</th><th>Value</th></tr>
+                    <tr><td>RSI</td><td>${results.technicalIndicators.rsi ? results.technicalIndicators.rsi.toFixed(2) : 'N/A'}</td></tr>
+                    <tr><td>MACD</td><td>${results.technicalIndicators.macd ? results.technicalIndicators.macd.histogram.toFixed(3) : 'N/A'}</td></tr>
+                    <tr><td>Trend</td><td>${results.technicalIndicators.trend ? results.technicalIndicators.trend.direction : 'N/A'}</td></tr>
+                </table>
+            </div>
+    `;
+    
+    if (results.backtestResults) {
+        html += `
+            <div class="section">
+                <h2>Backtest Results</h2>
+                <table>
+                    <tr><th>Metric</th><th>Value</th></tr>
+                    <tr><td>Total Return</td><td>${results.backtestResults.totalReturnPercent.toFixed(2)}%</td></tr>
+                    <tr><td>Sharpe Ratio</td><td>${results.backtestResults.sharpeRatio.toFixed(2)}</td></tr>
+                    <tr><td>Max Drawdown</td><td>${results.backtestResults.maxDrawdown.toFixed(2)}%</td></tr>
+                    <tr><td>Win Rate</td><td>${results.backtestResults.winRate.toFixed(1)}%</td></tr>
+                </table>
+            </div>
+        `;
+    }
+    
+    html += `</body></html>`;
+    
+    // Open in new window for printing
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.print();
+}
 

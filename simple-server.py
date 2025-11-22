@@ -36,20 +36,26 @@ class CORSProxyHandler(SimpleHTTPRequestHandler):
             start_date = query_params.get('startDate', [None])[0]
             end_date = query_params.get('endDate', [None])[0]
             
-            if not all([ticker, start_date, end_date]):
-                self.send_response(400)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({'error': 'Missing parameters'}).encode())
-                return
+        if not all([ticker, start_date, end_date]):
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': 'Missing parameters'}).encode())
+            return
+        
+        # Get interval parameter
+        interval = query_params.get('interval', ['1mo'])[0]
             
-            # Fetch from Yahoo Finance
-            from datetime import datetime
-            import time
-            period1 = int(time.mktime(datetime.strptime(start_date, '%Y-%m-%d').timetuple()))
-            period2 = int(time.mktime(datetime.strptime(end_date, '%Y-%m-%d').timetuple()))
-            
-            yahoo_url = f'https://query1.finance.yahoo.com/v7/finance/download/{ticker}?period1={period1}&period2={period2}&interval=1mo&events=history&includeAdjustedClose=true'
+        # Fetch from Yahoo Finance
+        from datetime import datetime
+        import time
+        period1 = int(time.mktime(datetime.strptime(start_date, '%Y-%m-%d').timetuple()))
+        period2 = int(time.mktime(datetime.strptime(end_date, '%Y-%m-%d').timetuple()))
+        
+        # Get interval parameter (default to 1mo for monthly)
+        interval = query_params.get('interval', ['1mo'])[0]
+        
+        yahoo_url = f'https://query1.finance.yahoo.com/v7/finance/download/{ticker}?period1={period1}&period2={period2}&interval={interval}&events=history&includeAdjustedClose=true'
             
             try:
                 response = urlopen(yahoo_url, timeout=10)
