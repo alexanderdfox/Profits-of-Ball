@@ -100,9 +100,18 @@ if (!analyzeBtn) {
     console.error('Analyze button not found!');
 } else {
     analyzeBtn.addEventListener('click', async () => {
-    const ticker = document.getElementById('ticker').value.trim().toUpperCase();
-    const startDate = document.getElementById('startDate').value;
-    const endDate = document.getElementById('endDate').value;
+    const tickerEl = document.getElementById('ticker');
+    const startDateEl = document.getElementById('startDate');
+    const endDateEl = document.getElementById('endDate');
+    
+    if (!tickerEl || !startDateEl || !endDateEl) {
+        showError('Required form elements not found. Please refresh the page.');
+        return;
+    }
+    
+    const ticker = tickerEl.value.trim().toUpperCase();
+    const startDate = startDateEl.value;
+    const endDate = endDateEl.value;
 
     if (!ticker) {
         showError('Please enter a stock ticker symbol');
@@ -110,27 +119,43 @@ if (!analyzeBtn) {
     }
 
     // Hide previous results and show loading
-    document.getElementById('results').classList.add('hidden');
-    document.getElementById('error').classList.add('hidden');
-    document.getElementById('loading').classList.remove('hidden');
+    const resultsEl = document.getElementById('results');
+    const errorEl = document.getElementById('error');
+    const loadingEl = document.getElementById('loading');
+    
+    if (resultsEl) resultsEl.classList.add('hidden');
+    if (errorEl) errorEl.classList.add('hidden');
+    if (loadingEl) loadingEl.classList.remove('hidden');
 
     try {
         // Check if using file:// protocol - show helpful error
         if (window.location.protocol === 'file:') {
-            document.getElementById('loading').classList.add('hidden');
+            if (loadingEl) loadingEl.classList.add('hidden');
             showError('❌ CORS Error: You\'re opening the HTML file directly!\n\n✅ SOLUTION: Use the Python server:\n\n1. Open Terminal in this folder\n2. Run: python3 simple-server.py\n   (or: python simple-server.py)\n3. Open: http://localhost:8000\n4. Try again!\n\nThis bypasses CORS issues completely.\n\nSee START-HERE.md for detailed instructions.');
             return;
         }
         
-        const timeframe = document.getElementById('timeframe').value || '1mo';
-        const enableBacktest = document.getElementById('enableBacktest').checked;
-        const backtestMode = document.getElementById('backtestMode') ? document.getElementById('backtestMode').value || 'simple' : 'simple';
-        const enablePortfolio = document.getElementById('enablePortfolio') ? document.getElementById('enablePortfolio').checked : false;
-        const portfolioTickers = enablePortfolio && document.getElementById('portfolioTickers') ? 
-            document.getElementById('portfolioTickers').value.split(',').map(t => t.trim().toUpperCase()).filter(t => t) : [];
+        const timeframeEl = document.getElementById('timeframe');
+        const timeframe = timeframeEl ? (timeframeEl.value || '1mo') : '1mo';
+        
+        const enableBacktestEl = document.getElementById('enableBacktest');
+        const enableBacktest = enableBacktestEl ? enableBacktestEl.checked : false;
+        
+        const backtestModeEl = document.getElementById('backtestMode');
+        const backtestMode = backtestModeEl ? (backtestModeEl.value || 'simple') : 'simple';
+        
+        const enablePortfolioEl = document.getElementById('enablePortfolio');
+        const enablePortfolio = enablePortfolioEl ? enablePortfolioEl.checked : false;
+        
+        const portfolioTickersEl = document.getElementById('portfolioTickers');
+        const portfolioTickers = enablePortfolio && portfolioTickersEl ? 
+            portfolioTickersEl.value.split(',').map(t => t.trim().toUpperCase()).filter(t => t) : [];
+        
         const enableOptimizationEl = document.getElementById('enableOptimization');
         const enableOptimization = enableOptimizationEl ? enableOptimizationEl.checked : false;
-        const enableRealtime = document.getElementById('enableRealtime') ? document.getElementById('enableRealtime').checked : false;
+        
+        const enableRealtimeEl = document.getElementById('enableRealtime');
+        const enableRealtime = enableRealtimeEl ? enableRealtimeEl.checked : false;
         
         // Show/hide portfolio inputs
         if (document.getElementById('portfolioTickersGroup')) {
@@ -2135,68 +2160,90 @@ function showError(message) {
     
     // Format message with line breaks
     const formattedMessage = message.replace(/\n/g, '<br>');
-    errorEl.innerHTML = formattedMessage;
+    errorEl.innerHTML = `<strong>⚠️ Error:</strong><br>${formattedMessage}`;
     errorEl.classList.remove('hidden');
     
     // Scroll to error
-    errorEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-    const errorDiv = document.getElementById('error');
-    // Convert newlines to HTML breaks
-    const formattedMessage = message.replace(/\n/g, '<br>');
-    errorDiv.innerHTML = `<strong>⚠️ Error:</strong><br>${formattedMessage}`;
-    errorDiv.classList.remove('hidden');
-    
-    // Scroll to error
-    errorDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    errorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // Allow Enter key to trigger analysis
-document.getElementById('ticker').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        document.getElementById('analyzeBtn').click();
-    }
-});
+const tickerInput = document.getElementById('ticker');
+if (tickerInput) {
+    tickerInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            const analyzeBtnEl = document.getElementById('analyzeBtn');
+            if (analyzeBtnEl) {
+                analyzeBtnEl.click();
+            }
+        }
+    });
+}
 
 // Set default end date to today
-document.getElementById('endDate').valueAsDate = new Date();
+const endDateInput = document.getElementById('endDate');
+if (endDateInput) {
+    endDateInput.valueAsDate = new Date();
+}
 
 // Export functionality
-document.getElementById('exportCSV').addEventListener('click', () => {
-    if (!window.lastAnalysisResults) {
-        alert('No analysis data to export. Please run an analysis first.');
-        return;
-    }
-    exportToCSV(window.lastAnalysisResults);
-});
+const exportCSVBtn = document.getElementById('exportCSV');
+if (exportCSVBtn) {
+    exportCSVBtn.addEventListener('click', () => {
+        if (!window.lastAnalysisResults) {
+            alert('No analysis data to export. Please run an analysis first.');
+            return;
+        }
+        exportToCSV(window.lastAnalysisResults);
+    });
+}
 
-document.getElementById('exportJSON').addEventListener('click', () => {
-    if (!window.lastAnalysisResults) {
-        alert('No analysis data to export. Please run an analysis first.');
-        return;
-    }
-    exportToJSON(window.lastAnalysisResults);
-});
+const exportJSONBtn = document.getElementById('exportJSON');
+if (exportJSONBtn) {
+    exportJSONBtn.addEventListener('click', () => {
+        if (!window.lastAnalysisResults) {
+            alert('No analysis data to export. Please run an analysis first.');
+            return;
+        }
+        exportToJSON(window.lastAnalysisResults);
+    });
+}
 
-document.getElementById('exportImage').addEventListener('click', () => {
-    if (!priceChart) {
-        alert('No chart to export. Please run an analysis first.');
-        return;
-    }
-    const url = priceChart.toBase64Image();
-    const link = document.createElement('a');
-    link.download = `stock-chart-${Date.now()}.png`;
-    link.href = url;
-    link.click();
-});
+const exportImageBtn = document.getElementById('exportImage');
+if (exportImageBtn) {
+    exportImageBtn.addEventListener('click', () => {
+        if (!priceChart || typeof priceChart.toBase64Image !== 'function') {
+            alert('No chart to export. Please run an analysis first.');
+            return;
+        }
+        try {
+            const url = priceChart.toBase64Image();
+            const link = document.createElement('a');
+            link.download = `stock-chart-${Date.now()}.png`;
+            link.href = url;
+            link.click();
+        } catch (error) {
+            console.error('Error exporting image:', error);
+            alert('Failed to export image. Please try again.');
+        }
+    });
+}
 
-document.getElementById('exportReport').addEventListener('click', () => {
-    if (!window.lastAnalysisResults) {
-        alert('No analysis data to export. Please run an analysis first.');
-        return;
-    }
-    generatePDFReport(window.lastAnalysisResults);
-});
+const exportReportBtn = document.getElementById('exportReport');
+if (exportReportBtn) {
+    exportReportBtn.addEventListener('click', () => {
+        if (!window.lastAnalysisResults) {
+            alert('No analysis data to export. Please run an analysis first.');
+            return;
+        }
+        try {
+            generatePDFReport(window.lastAnalysisResults);
+        } catch (error) {
+            console.error('Error exporting report:', error);
+            alert('Failed to export report. Please try again.');
+        }
+    });
+}
 
 // Additional Technical Indicators
 function calculateADX(prices, period = 14) {
