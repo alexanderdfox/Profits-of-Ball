@@ -24,7 +24,10 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         const forecastMonths = parseInt(document.getElementById('forecastMonths').value) || 0;
         const buyPrice = parseFloat(document.getElementById('buyPrice').value);
         const numShares = parseInt(document.getElementById('numShares').value) || 1;
-        analyzeStock(data, ticker, forecastMonths, buyPrice, numShares);
+        const riskPercent = parseFloat(document.getElementById('riskPercent').value) || 2;
+        const stopLossPercent = parseFloat(document.getElementById('stopLossPercent').value) || 5;
+        const takeProfitPercent = parseFloat(document.getElementById('takeProfitPercent').value) || 10;
+        analyzeStock(data, ticker, forecastMonths, buyPrice, numShares, riskPercent, stopLossPercent, takeProfitPercent);
         document.getElementById('loading').classList.add('hidden');
         document.getElementById('results').classList.remove('hidden');
     } catch (error) {
@@ -255,7 +258,7 @@ function parseCSVLine(line) {
     return result;
 }
 
-function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShares = 1) {
+function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShares = 1, riskPercent = 2, stopLossPercent = 5, takeProfitPercent = 10) {
     if (data.length < 2) {
         throw new Error('Insufficient data for analysis');
     }
@@ -308,11 +311,29 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         const lastDate = dates[dates.length - 1];
         const lastPrice = monthly[monthly.length - 1];
         
+        // Calculate volatility clustering (GARCH-like model)
+        // This accounts for volatility clustering where high volatility tends to follow high volatility
+        const volatilitySeries = [];
+        for (let i = 1; i < delta_U.length; i++) {
+            const vol = Math.abs(delta_U[i]);
+            volatilitySeries.push(vol);
+        }
+        
+        // Calculate recent volatility (short-term) vs long-term average
+        const recentVolWindow = Math.min(6, Math.floor(volatilitySeries.length / 2));
+        const recentVol = volatilitySeries.slice(-recentVolWindow).reduce((a, b) => a + b, 0) / recentVolWindow;
+        const longTermVol = delta_U_std;
+        const volRatio = recentVol / longTermVol; // Volatility adjustment factor
+        
         // Generate future dates (monthly intervals)
         predictedDates = [];
         predictedPrices = [lastPrice];
         predictedPricesOptimistic = [lastPrice];
         predictedPricesPessimistic = [lastPrice];
+        
+        // Current volatility state (for clustering)
+        let currentVolatility = delta_U_std * volRatio;
+        const volDecay = 0.9; // Volatility tends to mean-revert
         
         for (let i = 1; i <= forecastMonths; i++) {
             const nextDate = new Date(lastDate);
@@ -322,13 +343,21 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
             // Base prediction: use average planned change
             const baseChange = avg_change;
             
-            // Generate multiple scenarios
-            // Optimistic: avg_change + 0.5 * std
-            // Pessimistic: avg_change - 0.5 * std
-            // Base: avg_change
-            const optimisticChange = baseChange + 0.5 * delta_U_std;
-            const pessimisticChange = baseChange - 0.5 * delta_U_std;
-            const randomChange = baseChange + seededNormal(seed + 1000 + i, 0, delta_U_std);
+            // Adjust volatility with clustering effect (volatility persistence + mean reversion)
+            currentVolatility = currentVolatility * volDecay + delta_U_std * (1 - volDecay);
+            
+            // Add momentum factor based on recent trend
+            const recentTrend = monthly.length >= 3 ? 
+                (monthly[monthly.length - 1] - monthly[monthly.length - 3]) / 3 : 0;
+            const momentumAdjustment = recentTrend * 0.3; // Dampened momentum
+            
+            // Generate multiple scenarios with volatility clustering
+            // Optimistic: avg_change + momentum + 0.5 * adjusted_std
+            // Pessimistic: avg_change + momentum - 0.5 * adjusted_std
+            // Base: avg_change + momentum + random noise with adjusted volatility
+            const optimisticChange = baseChange + momentumAdjustment + 0.5 * currentVolatility;
+            const pessimisticChange = baseChange + momentumAdjustment - 0.5 * currentVolatility;
+            const randomChange = baseChange + momentumAdjustment + seededNormal(seed + 1000 + i, 0, currentVolatility);
             
             predictedPrices.push(predictedPrices[predictedPrices.length - 1] + randomChange);
             predictedPricesOptimistic.push(predictedPricesOptimistic[predictedPricesOptimistic.length - 1] + optimisticChange);
@@ -359,10 +388,23 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
     // Calculate and display profit if buy price is provided
     calculateProfit(buyPrice, numShares, monthly[monthly.length - 1], finalPredictedPrice, forecastMonths);
 
-    // Create chart with predictions
+    // Calculate technical indicators
+    const technicalIndicators = calculateTechnicalIndicators(monthly, dates);
+    
+    // Generate trading signals
+    const signals = generateTradingSignals(technicalIndicators, monthly);
+    
+    // Display trading signals and market context
+    displayTradingSignals(signals, technicalIndicators, monthly[monthly.length - 1]);
+    
+    // Calculate risk management
+    const currentPrice = monthly[monthly.length - 1];
+    calculateRiskManagement(currentPrice, buyPrice, riskPercent, stopLossPercent, takeProfitPercent, numShares);
+
+    // Create chart with predictions and indicators
     createChart(dates, monthly, sim_prices_det, sim_prices_stoch, ticker, 
                 predictedDates, predictedPrices, predictedPricesOptimistic, predictedPricesPessimistic,
-                buyPrice);
+                buyPrice, technicalIndicators);
 
     // Show big moves (threshold is 1.5 * standard deviation)
     const thresholdValue = delta_U_std * 1.5;
@@ -440,6 +482,351 @@ function calculateStdDev(values) {
     return Math.sqrt(variance);
 }
 
+// Technical Indicators
+function calculateRSI(prices, period = 14) {
+    if (prices.length < period + 1) return null;
+    
+    const gains = [];
+    const losses = [];
+    
+    for (let i = 1; i < prices.length; i++) {
+        const change = prices[i] - prices[i - 1];
+        gains.push(change > 0 ? change : 0);
+        losses.push(change < 0 ? Math.abs(change) : 0);
+    }
+    
+    const avgGain = gains.slice(-period).reduce((a, b) => a + b, 0) / period;
+    const avgLoss = losses.slice(-period).reduce((a, b) => a + b, 0) / period;
+    
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+}
+
+function calculateMACD(prices, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+    if (prices.length < slowPeriod) return null;
+    
+    const emaFast = calculateEMA(prices, fastPeriod);
+    const emaSlow = calculateEMA(prices, slowPeriod);
+    
+    if (emaFast.length < signalPeriod || emaSlow.length < signalPeriod) return null;
+    
+    const macdLine = emaFast.slice(-signalPeriod).map((fast, i) => fast - emaSlow[emaSlow.length - signalPeriod + i]);
+    const signalLine = calculateEMA(macdLine, signalPeriod);
+    
+    return {
+        macd: macdLine[macdLine.length - 1],
+        signal: signalLine[signalLine.length - 1],
+        histogram: macdLine[macdLine.length - 1] - signalLine[signalLine.length - 1]
+    };
+}
+
+function calculateEMA(prices, period) {
+    if (prices.length < period) return [];
+    
+    const multiplier = 2 / (period + 1);
+    const ema = [prices.slice(0, period).reduce((a, b) => a + b, 0) / period];
+    
+    for (let i = period; i < prices.length; i++) {
+        ema.push((prices[i] - ema[ema.length - 1]) * multiplier + ema[ema.length - 1]);
+    }
+    
+    return ema;
+}
+
+function calculateMovingAverage(prices, period) {
+    if (prices.length < period) return null;
+    const sum = prices.slice(-period).reduce((a, b) => a + b, 0);
+    return sum / period;
+}
+
+function calculateBollingerBands(prices, period = 20, stdDev = 2) {
+    if (prices.length < period) return null;
+    
+    const sma = calculateMovingAverage(prices, period);
+    const periodPrices = prices.slice(-period);
+    const variance = periodPrices.reduce((sum, price) => sum + Math.pow(price - sma, 2), 0) / period;
+    const std = Math.sqrt(variance);
+    
+    return {
+        upper: sma + (stdDev * std),
+        middle: sma,
+        lower: sma - (stdDev * std)
+    };
+}
+
+function calculateVolatilityRegime(prices) {
+    if (prices.length < 20) return { regime: 'Unknown', level: 0 };
+    
+    const returns = [];
+    for (let i = 1; i < prices.length; i++) {
+        returns.push(Math.abs((prices[i] - prices[i - 1]) / prices[i - 1]));
+    }
+    
+    const shortVol = returns.slice(-10).reduce((a, b) => a + b, 0) / 10;
+    const longVol = returns.reduce((a, b) => a + b, 0) / returns.length;
+    
+    const ratio = shortVol / longVol;
+    let regime = 'Normal';
+    
+    if (ratio > 1.5) regime = 'High';
+    else if (ratio < 0.7) regime = 'Low';
+    
+    return { regime, level: shortVol * 100 };
+}
+
+function calculateTrendStrength(prices, period = 20) {
+    if (prices.length < period * 2) return { strength: 0, direction: 'Neutral' };
+    
+    const shortMA = calculateMovingAverage(prices.slice(-period), period);
+    const longMA = calculateMovingAverage(prices.slice(-period * 2), period);
+    const currentPrice = prices[prices.length - 1];
+    
+    const trendDirection = currentPrice > shortMA && shortMA > longMA ? 'Bullish' :
+                          currentPrice < shortMA && shortMA < longMA ? 'Bearish' : 'Neutral';
+    
+    // Calculate ADX-like trend strength
+    const priceChange = prices.slice(-period).map((p, i) => {
+        if (i === 0) return 0;
+        return Math.abs(p - prices[prices.length - period + i - 1]);
+    });
+    const avgChange = priceChange.reduce((a, b) => a + b, 0) / period;
+    const avgPrice = calculateMovingAverage(prices.slice(-period), period);
+    const strength = (avgChange / avgPrice) * 100;
+    
+    return { strength: Math.min(strength * 10, 100), direction: trendDirection };
+}
+
+function calculateSupportResistance(prices, lookback = 50) {
+    if (prices.length < lookback) lookback = prices.length;
+    
+    const recentPrices = prices.slice(-lookback);
+    const highs = [];
+    const lows = [];
+    
+    for (let i = 1; i < recentPrices.length - 1; i++) {
+        if (recentPrices[i] > recentPrices[i - 1] && recentPrices[i] > recentPrices[i + 1]) {
+            highs.push(recentPrices[i]);
+        }
+        if (recentPrices[i] < recentPrices[i - 1] && recentPrices[i] < recentPrices[i + 1]) {
+            lows.push(recentPrices[i]);
+        }
+    }
+    
+    const resistance = highs.length > 0 ? Math.max(...highs) : null;
+    const support = lows.length > 0 ? Math.min(...lows) : null;
+    const currentPrice = prices[prices.length - 1];
+    
+    let position = 'Middle';
+    if (resistance && support) {
+        const range = resistance - support;
+        const positionPercent = ((currentPrice - support) / range) * 100;
+        if (positionPercent > 75) position = 'Near Resistance';
+        else if (positionPercent < 25) position = 'Near Support';
+    }
+    
+    return { support, resistance, position, currentPrice };
+}
+
+function calculateTechnicalIndicators(prices, dates) {
+    return {
+        rsi: calculateRSI(prices),
+        macd: calculateMACD(prices),
+        sma20: calculateMovingAverage(prices, 20),
+        sma50: calculateMovingAverage(prices, 50),
+        bollingerBands: calculateBollingerBands(prices),
+        volatility: calculateVolatilityRegime(prices),
+        trend: calculateTrendStrength(prices),
+        supportResistance: calculateSupportResistance(prices),
+        currentPrice: prices[prices.length - 1]
+    };
+}
+
+function generateTradingSignals(indicators, prices) {
+    const signals = [];
+    let overallSignal = 'HOLD';
+    let signalStrength = 0;
+    
+    // RSI signals
+    if (indicators.rsi !== null) {
+        if (indicators.rsi < 30) {
+            signals.push({ type: 'BUY', source: 'RSI Oversold', strength: 1 });
+            signalStrength += 1;
+        } else if (indicators.rsi > 70) {
+            signals.push({ type: 'SELL', source: 'RSI Overbought', strength: 1 });
+            signalStrength -= 1;
+        }
+    }
+    
+    // MACD signals
+    if (indicators.macd !== null) {
+        if (indicators.macd.histogram > 0 && indicators.macd.macd > indicators.macd.signal) {
+            signals.push({ type: 'BUY', source: 'MACD Bullish', strength: 1 });
+            signalStrength += 1;
+        } else if (indicators.macd.histogram < 0 && indicators.macd.macd < indicators.macd.signal) {
+            signals.push({ type: 'SELL', source: 'MACD Bearish', strength: 1 });
+            signalStrength -= 1;
+        }
+    }
+    
+    // Moving Average signals
+    const currentPrice = prices[prices.length - 1];
+    if (indicators.sma20 !== null && indicators.sma50 !== null) {
+        if (currentPrice > indicators.sma20 && indicators.sma20 > indicators.sma50) {
+            signals.push({ type: 'BUY', source: 'Golden Cross', strength: 1.5 });
+            signalStrength += 1.5;
+        } else if (currentPrice < indicators.sma20 && indicators.sma20 < indicators.sma50) {
+            signals.push({ type: 'SELL', source: 'Death Cross', strength: 1.5 });
+            signalStrength -= 1.5;
+        }
+    }
+    
+    // Trend strength signals
+    if (indicators.trend.direction === 'Bullish' && indicators.trend.strength > 50) {
+        signals.push({ type: 'BUY', source: 'Strong Uptrend', strength: 1 });
+        signalStrength += 1;
+    } else if (indicators.trend.direction === 'Bearish' && indicators.trend.strength > 50) {
+        signals.push({ type: 'SELL', source: 'Strong Downtrend', strength: 1 });
+        signalStrength -= 1;
+    }
+    
+    // Support/Resistance signals
+    if (indicators.supportResistance.position === 'Near Support') {
+        signals.push({ type: 'BUY', source: 'Support Level', strength: 0.5 });
+        signalStrength += 0.5;
+    } else if (indicators.supportResistance.position === 'Near Resistance') {
+        signals.push({ type: 'SELL', source: 'Resistance Level', strength: 0.5 });
+        signalStrength -= 0.5;
+    }
+    
+    // Determine overall signal
+    if (signalStrength >= 2) overallSignal = 'STRONG BUY';
+    else if (signalStrength >= 1) overallSignal = 'BUY';
+    else if (signalStrength <= -2) overallSignal = 'STRONG SELL';
+    else if (signalStrength <= -1) overallSignal = 'SELL';
+    
+    return {
+        overall: overallSignal,
+        strength: Math.abs(signalStrength),
+        signals: signals,
+        signalStrength: signalStrength
+    };
+}
+
+function displayTradingSignals(signals, indicators, currentPrice) {
+    // Current Signal
+    const signalEl = document.getElementById('signalValue');
+    const strengthEl = document.getElementById('signalStrength');
+    
+    signalEl.className = 'signal-value';
+    if (signals.overall.includes('BUY')) {
+        signalEl.classList.add('signal-buy');
+        signalEl.textContent = signals.overall;
+    } else if (signals.overall.includes('SELL')) {
+        signalEl.classList.add('signal-sell');
+        signalEl.textContent = signals.overall;
+    } else {
+        signalEl.classList.add('signal-hold');
+        signalEl.textContent = signals.overall;
+    }
+    
+    const strengthPercent = Math.min((signals.strength / 5) * 100, 100);
+    strengthEl.textContent = `Strength: ${strengthPercent.toFixed(0)}%`;
+    strengthEl.className = 'signal-strength';
+    
+    // RSI
+    if (indicators.rsi !== null) {
+        document.getElementById('rsiValue').textContent = indicators.rsi.toFixed(2);
+        let rsiInterp = 'Neutral';
+        if (indicators.rsi < 30) rsiInterp = 'Oversold (Buy Signal)';
+        else if (indicators.rsi > 70) rsiInterp = 'Overbought (Sell Signal)';
+        else if (indicators.rsi < 50) rsiInterp = 'Bearish';
+        else rsiInterp = 'Bullish';
+        document.getElementById('rsiInterpretation').textContent = rsiInterp;
+    } else {
+        document.getElementById('rsiValue').textContent = 'N/A';
+        document.getElementById('rsiInterpretation').textContent = 'Insufficient data';
+    }
+    
+    // MACD
+    if (indicators.macd !== null) {
+        document.getElementById('macdValue').textContent = indicators.macd.histogram.toFixed(3);
+        const macdInterp = indicators.macd.histogram > 0 ? 
+            'Bullish (MACD > Signal)' : 'Bearish (MACD < Signal)';
+        document.getElementById('macdInterpretation').textContent = macdInterp;
+    } else {
+        document.getElementById('macdValue').textContent = 'N/A';
+        document.getElementById('macdInterpretation').textContent = 'Insufficient data';
+    }
+    
+    // Trend Strength
+    document.getElementById('trendStrength').textContent = `${indicators.trend.strength.toFixed(0)}%`;
+    document.getElementById('trendDirection').textContent = indicators.trend.direction;
+    
+    // Volatility Regime
+    document.getElementById('volatilityRegime').textContent = indicators.volatility.regime;
+    document.getElementById('volatilityLevel').textContent = `Volatility: ${indicators.volatility.level.toFixed(2)}%`;
+    
+    // Support/Resistance
+    if (indicators.supportResistance.support && indicators.supportResistance.resistance) {
+        document.getElementById('supportResistance').textContent = 
+            `$${indicators.supportResistance.support.toFixed(2)} - $${indicators.supportResistance.resistance.toFixed(2)}`;
+        document.getElementById('pricePosition').textContent = indicators.supportResistance.position;
+    } else {
+        document.getElementById('supportResistance').textContent = 'Calculating...';
+        document.getElementById('pricePosition').textContent = '-';
+    }
+}
+
+function calculateRiskManagement(currentPrice, buyPrice, riskPercent, stopLossPercent, takeProfitPercent, numShares) {
+    const entryPrice = buyPrice || currentPrice;
+    
+    // Stop Loss
+    const stopLossPrice = entryPrice * (1 - stopLossPercent / 100);
+    const stopLossDistance = entryPrice - stopLossPrice;
+    document.getElementById('stopLossPrice').textContent = `$${stopLossPrice.toFixed(2)}`;
+    document.getElementById('stopLossDetails').textContent = 
+        `${stopLossPercent}% below entry (${stopLossDistance.toFixed(2)} per share)` ;
+    
+    // Take Profit
+    const takeProfitPrice = entryPrice * (1 + takeProfitPercent / 100);
+    const takeProfitDistance = takeProfitPrice - entryPrice;
+    document.getElementById('takeProfitPrice').textContent = `$${takeProfitPrice.toFixed(2)}`;
+    document.getElementById('takeProfitDetails').textContent = 
+        `${takeProfitPercent}% above entry (${takeProfitDistance.toFixed(2)} per share)`;
+    
+    // Position Sizing
+    const accountRisk = riskPercent / 100; // Assume account value for calculation
+    const riskPerShare = stopLossDistance;
+    let recommendedShares = 1;
+    let positionValue = 0;
+    
+    if (riskPerShare > 0) {
+        // Position size based on risk amount
+        // This is simplified - in practice, you'd use account value
+        const maxLoss = entryPrice * accountRisk; // Max loss as % of position
+        recommendedShares = Math.floor(maxLoss / riskPerShare);
+        recommendedShares = Math.max(1, Math.min(recommendedShares, 10000)); // Reasonable bounds
+        positionValue = entryPrice * recommendedShares;
+    }
+    
+    document.getElementById('positionSize').textContent = `${recommendedShares} shares`;
+    document.getElementById('positionDetails').textContent = 
+        `Position value: $${positionValue.toFixed(2)} (${riskPercent}% risk)`;
+    
+    // Risk/Reward Ratio
+    const riskRewardRatio = takeProfitDistance / stopLossDistance;
+    const ratioClass = riskRewardRatio >= 2 ? 'risk-good' : riskRewardRatio >= 1 ? 'risk-ok' : 'risk-poor';
+    document.getElementById('riskRewardRatio').textContent = `${riskRewardRatio.toFixed(2)}:1`;
+    document.getElementById('riskRewardRatio').className = `risk-value ${ratioClass}`;
+    
+    let rrDetails = '';
+    if (riskRewardRatio >= 2) rrDetails = 'Excellent (≥2:1)';
+    else if (riskRewardRatio >= 1) rrDetails = 'Good (≥1:1)';
+    else rrDetails = 'Poor (<1:1) - Consider adjusting targets';
+    document.getElementById('riskRewardDetails').textContent = rrDetails;
+}
+
 // Seeded random number generator for reproducibility
 function seededRandom(seed) {
     const x = Math.sin(seed) * 10000;
@@ -463,7 +850,7 @@ function seededNormal(seed, mean, stdDev) {
 function createChart(dates, actual, deterministic, stochastic, ticker, 
                     predictedDates = [], predictedPrices = [], 
                     predictedOptimistic = [], predictedPessimistic = [],
-                    buyPrice = null) {
+                    buyPrice = null, technicalIndicators = null) {
     const ctx = document.getElementById('priceChart').getContext('2d');
     
     if (priceChart) {
@@ -608,6 +995,120 @@ function createChart(dates, actual, deterministic, stochastic, ticker,
             tension: 0,
             fill: false
         });
+        
+        // Add stop loss and take profit lines if buy price exists
+        const stopLossPercent = parseFloat(document.getElementById('stopLossPercent')?.value || 5);
+        const takeProfitPercent = parseFloat(document.getElementById('takeProfitPercent')?.value || 10);
+        
+        if (stopLossPercent) {
+            const stopLossPrice = buyPrice * (1 - stopLossPercent / 100);
+            datasets.push({
+                label: `Stop Loss @ $${stopLossPrice.toFixed(2)}`,
+                data: [
+                    { x: firstDate, y: stopLossPrice },
+                    { x: lastDate, y: stopLossPrice }
+                ],
+                borderColor: 'rgba(220, 53, 69, 0.6)',
+                backgroundColor: 'rgba(220, 53, 69, 0.05)',
+                borderWidth: 1.5,
+                borderDash: [5, 5],
+                pointRadius: 0,
+                tension: 0,
+                fill: false
+            });
+        }
+        
+        if (takeProfitPercent) {
+            const takeProfitPrice = buyPrice * (1 + takeProfitPercent / 100);
+            datasets.push({
+                label: `Take Profit @ $${takeProfitPrice.toFixed(2)}`,
+                data: [
+                    { x: firstDate, y: takeProfitPrice },
+                    { x: lastDate, y: takeProfitPrice }
+                ],
+                borderColor: 'rgba(40, 167, 69, 0.6)',
+                backgroundColor: 'rgba(40, 167, 69, 0.05)',
+                borderWidth: 1.5,
+                borderDash: [5, 5],
+                pointRadius: 0,
+                tension: 0,
+                fill: false
+            });
+        }
+    }
+    
+    // Add technical indicators to chart
+    if (technicalIndicators) {
+        // Moving Averages
+        if (technicalIndicators.sma20 !== null && dates.length >= 20) {
+            const sma20Data = [];
+            for (let i = 19; i < dates.length; i++) {
+                sma20Data.push({ x: dates[i], y: calculateMovingAverage(actual.slice(0, i + 1), 20) });
+            }
+            if (sma20Data.length > 0) {
+                datasets.push({
+                    label: 'SMA 20',
+                    data: sma20Data,
+                    borderColor: 'rgba(255, 193, 7, 0.7)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: 0.1
+                });
+            }
+        }
+        
+        if (technicalIndicators.sma50 !== null && dates.length >= 50) {
+            const sma50Data = [];
+            for (let i = 49; i < dates.length; i++) {
+                sma50Data.push({ x: dates[i], y: calculateMovingAverage(actual.slice(0, i + 1), 50) });
+            }
+            if (sma50Data.length > 0) {
+                datasets.push({
+                    label: 'SMA 50',
+                    data: sma50Data,
+                    borderColor: 'rgba(255, 152, 0, 0.7)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: 0.1
+                });
+            }
+        }
+        
+        // Support/Resistance levels
+        if (technicalIndicators.supportResistance.support && technicalIndicators.supportResistance.resistance) {
+            const firstDate = dates[0];
+            const lastDate = predictedDates.length > 0 ? predictedDates[predictedDates.length - 1] : dates[dates.length - 1];
+            
+            datasets.push({
+                label: `Support @ $${technicalIndicators.supportResistance.support.toFixed(2)}`,
+                data: [
+                    { x: firstDate, y: technicalIndicators.supportResistance.support },
+                    { x: lastDate, y: technicalIndicators.supportResistance.support }
+                ],
+                borderColor: 'rgba(40, 167, 69, 0.4)',
+                backgroundColor: 'transparent',
+                borderWidth: 1,
+                borderDash: [3, 3],
+                pointRadius: 0,
+                tension: 0
+            });
+            
+            datasets.push({
+                label: `Resistance @ $${technicalIndicators.supportResistance.resistance.toFixed(2)}`,
+                data: [
+                    { x: firstDate, y: technicalIndicators.supportResistance.resistance },
+                    { x: lastDate, y: technicalIndicators.supportResistance.resistance }
+                ],
+                borderColor: 'rgba(220, 53, 69, 0.4)',
+                backgroundColor: 'transparent',
+                borderWidth: 1,
+                borderDash: [3, 3],
+                pointRadius: 0,
+                tension: 0
+            });
+        }
     }
 
     priceChart = new Chart(ctx, {

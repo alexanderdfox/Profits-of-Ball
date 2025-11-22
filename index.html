@@ -48,6 +48,18 @@
                 <label for="numShares">Number of Shares:</label>
                 <input type="number" id="numShares" placeholder="e.g., 100" value="1" min="1" step="1">
             </div>
+            <div class="input-group">
+                <label for="riskPercent">Risk % per Trade:</label>
+                <input type="number" id="riskPercent" placeholder="2" value="2" min="0.1" max="10" step="0.1">
+            </div>
+            <div class="input-group">
+                <label for="stopLossPercent">Stop Loss %:</label>
+                <input type="number" id="stopLossPercent" placeholder="5" value="5" min="1" max="20" step="0.5">
+            </div>
+            <div class="input-group">
+                <label for="takeProfitPercent">Take Profit %:</label>
+                <input type="number" id="takeProfitPercent" placeholder="10" value="10" min="1" max="50" step="0.5">
+            </div>
             <button id="analyzeBtn" class="btn-primary">Analyze Stock</button>
         </div>
 
@@ -110,6 +122,68 @@
 
             <div class="chart-container">
                 <canvas id="priceChart"></canvas>
+            </div>
+
+            <div class="trading-signals-section">
+                <h2>📊 Trading Signals & Market Context</h2>
+                <div class="signals-grid">
+                    <div class="signal-card" id="currentSignal">
+                        <h3>Current Signal</h3>
+                        <p class="signal-value" id="signalValue">-</p>
+                        <p class="signal-strength" id="signalStrength">-</p>
+                    </div>
+                    <div class="signal-card">
+                        <h3>RSI (14)</h3>
+                        <p class="signal-value" id="rsiValue">-</p>
+                        <p class="signal-interpretation" id="rsiInterpretation">-</p>
+                    </div>
+                    <div class="signal-card">
+                        <h3>MACD</h3>
+                        <p class="signal-value" id="macdValue">-</p>
+                        <p class="signal-interpretation" id="macdInterpretation">-</p>
+                    </div>
+                    <div class="signal-card">
+                        <h3>Trend Strength</h3>
+                        <p class="signal-value" id="trendStrength">-</p>
+                        <p class="signal-interpretation" id="trendDirection">-</p>
+                    </div>
+                    <div class="signal-card">
+                        <h3>Volatility Regime</h3>
+                        <p class="signal-value" id="volatilityRegime">-</p>
+                        <p class="signal-interpretation" id="volatilityLevel">-</p>
+                    </div>
+                    <div class="signal-card">
+                        <h3>Support/Resistance</h3>
+                        <p class="signal-value" id="supportResistance">-</p>
+                        <p class="signal-interpretation" id="pricePosition">-</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="risk-management-section">
+                <h2>🛡️ Risk Management</h2>
+                <div class="risk-grid">
+                    <div class="risk-card">
+                        <h3>Recommended Position Size</h3>
+                        <p class="risk-value" id="positionSize">-</p>
+                        <p class="risk-details" id="positionDetails">-</p>
+                    </div>
+                    <div class="risk-card">
+                        <h3>Stop Loss Level</h3>
+                        <p class="risk-value" id="stopLossPrice">-</p>
+                        <p class="risk-details" id="stopLossDetails">-</p>
+                    </div>
+                    <div class="risk-card">
+                        <h3>Take Profit Level</h3>
+                        <p class="risk-value" id="takeProfitPrice">-</p>
+                        <p class="risk-details" id="takeProfitDetails">-</p>
+                    </div>
+                    <div class="risk-card">
+                        <h3>Risk/Reward Ratio</h3>
+                        <p class="risk-value" id="riskRewardRatio">-</p>
+                        <p class="risk-details" id="riskRewardDetails">-</p>
+                    </div>
+                </div>
             </div>
 
             <div class="big-moves-section">
