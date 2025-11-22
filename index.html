@@ -63,6 +63,128 @@
             <button id="analyzeBtn" class="btn-primary">Analyze Stock</button>
         </div>
 
+        <div class="settings-toggle">
+            <button id="settingsToggle" class="btn-secondary">⚙️ Advanced Settings</button>
+        </div>
+
+        <div id="advancedSettings" class="advanced-settings hidden">
+            <h3>Maxwell Demon Model Parameters</h3>
+            <div class="settings-grid">
+                <div class="input-group">
+                    <label for="volDecay">Volatility Decay:</label>
+                    <input type="number" id="volDecay" value="0.9" min="0.5" max="0.99" step="0.01">
+                    <small>How quickly volatility reverts to mean (0.9 = 90% persistence)</small>
+                </div>
+                <div class="input-group">
+                    <label for="momentumFactor">Momentum Factor:</label>
+                    <input type="number" id="momentumFactor" value="0.3" min="0" max="1" step="0.05">
+                    <small>How much recent trend influences predictions (0-1)</small>
+                </div>
+                <div class="input-group">
+                    <label for="energyBarrierFactor">Energy Barrier Factor:</label>
+                    <input type="number" id="energyBarrierFactor" value="0.01" min="0.001" max="0.1" step="0.001">
+                    <small>Resistance to price transitions (higher = more resistance)</small>
+                </div>
+                <div class="input-group">
+                    <label for="demonEfficiencyAdjust">Demon Efficiency Adjustment:</label>
+                    <input type="number" id="demonEfficiencyAdjust" value="1.0" min="0.5" max="2.0" step="0.1">
+                    <small>Multiplier for demon's information efficiency</small>
+                </div>
+            </div>
+
+            <h3>Technical Indicator Parameters</h3>
+            <div class="settings-grid">
+                <div class="input-group">
+                    <label for="rsiPeriod">RSI Period:</label>
+                    <input type="number" id="rsiPeriod" value="14" min="5" max="30" step="1">
+                    <small>Relative Strength Index lookback period</small>
+                </div>
+                <div class="input-group">
+                    <label for="macdFast">MACD Fast Period:</label>
+                    <input type="number" id="macdFast" value="12" min="5" max="30" step="1">
+                    <small>MACD fast moving average period</small>
+                </div>
+                <div class="input-group">
+                    <label for="macdSlow">MACD Slow Period:</label>
+                    <input type="number" id="macdSlow" value="26" min="10" max="50" step="1">
+                    <small>MACD slow moving average period</small>
+                </div>
+                <div class="input-group">
+                    <label for="sma20Period">SMA 20 Period:</label>
+                    <input type="number" id="sma20Period" value="20" min="5" max="60" step="1">
+                    <small>Short moving average period</small>
+                </div>
+                <div class="input-group">
+                    <label for="sma50Period">SMA 50 Period:</label>
+                    <input type="number" id="sma50Period" value="50" min="20" max="120" step="1">
+                    <small>Long moving average period</small>
+                </div>
+                <div class="input-group">
+                    <label for="rsiOversold">RSI Oversold Threshold:</label>
+                    <input type="number" id="rsiOversold" value="30" min="10" max="40" step="1">
+                    <small>RSI level for oversold signal</small>
+                </div>
+                <div class="input-group">
+                    <label for="rsiOverbought">RSI Overbought Threshold:</label>
+                    <input type="number" id="rsiOverbought" value="70" min="60" max="90" step="1">
+                    <small>RSI level for overbought signal</small>
+                </div>
+            </div>
+
+            <h3>Signal Generation Parameters</h3>
+            <div class="settings-grid">
+                <div class="input-group">
+                    <label for="signalBuyThreshold">Buy Signal Threshold:</label>
+                    <input type="number" id="signalBuyThreshold" value="1" min="0.5" max="5" step="0.5">
+                    <small>Minimum signal strength for BUY signal</small>
+                </div>
+                <div class="input-group">
+                    <label for="signalStrongBuyThreshold">Strong Buy Threshold:</label>
+                    <input type="number" id="signalStrongBuyThreshold" value="2" min="1" max="10" step="0.5">
+                    <small>Minimum signal strength for STRONG BUY</small>
+                </div>
+                <div class="input-group">
+                    <label for="signalRsiWeight">RSI Signal Weight:</label>
+                    <input type="number" id="signalRsiWeight" value="1" min="0" max="3" step="0.5">
+                    <small>Weight of RSI in signal calculation</small>
+                </div>
+                <div class="input-group">
+                    <label for="signalMacdWeight">MACD Signal Weight:</label>
+                    <input type="number" id="signalMacdWeight" value="1" min="0" max="3" step="0.5">
+                    <small>Weight of MACD in signal calculation</small>
+                </div>
+                <div class="input-group">
+                    <label for="signalMaWeight">MA Signal Weight:</label>
+                    <input type="number" id="signalMaWeight" value="1.5" min="0" max="3" step="0.5">
+                    <small>Weight of Moving Average crossovers</small>
+                </div>
+                <div class="input-group">
+                    <label for="signalTrendWeight">Trend Signal Weight:</label>
+                    <input type="number" id="signalTrendWeight" value="1" min="0" max="3" step="0.5">
+                    <small>Weight of trend strength in signals</small>
+                </div>
+            </div>
+
+            <h3>Entropy & Information Parameters</h3>
+            <div class="settings-grid">
+                <div class="input-group">
+                    <label for="entropyBins">Entropy Bins:</label>
+                    <input type="number" id="entropyBins" value="10" min="5" max="20" step="1">
+                    <small>Number of bins for entropy calculation</small>
+                </div>
+                <div class="input-group">
+                    <label for="informationFlowWindow">Information Flow Window:</label>
+                    <input type="number" id="informationFlowWindow" value="6" min="3" max="12" step="1">
+                    <small>Recent volatility window size</small>
+                </div>
+            </div>
+
+            <div class="settings-actions">
+                <button id="resetSettings" class="btn-secondary">Reset to Defaults</button>
+                <button id="saveSettings" class="btn-secondary">Save Settings</button>
+            </div>
+        </div>
+
         <div id="loading" class="loading hidden">
             <div class="spinner"></div>
             <p>Loading stock data...</p>
@@ -83,6 +205,18 @@
                 <div class="stat-card">
                     <h3>Std Dev of Unexpected (ΔU)</h3>
                     <p class="stat-value" id="stdDev">-</p>
+                </div>
+                <div class="stat-card" id="entropyCard" style="display: none;">
+                    <h3>Information Entropy (H)</h3>
+                    <p class="stat-value" id="entropyValue">-</p>
+                </div>
+                <div class="stat-card" id="demonEfficiencyCard" style="display: none;">
+                    <h3>Demon Efficiency</h3>
+                    <p class="stat-value" id="demonEfficiency">-</p>
+                </div>
+                <div class="stat-card" id="temperatureCard" style="display: none;">
+                    <h3>Market Temperature</h3>
+                    <p class="stat-value" id="temperatureValue">-</p>
                 </div>
                 <div class="stat-card">
                     <h3>Final Actual Price</h3>

@@ -1,5 +1,49 @@
 let priceChart = null;
 
+// Settings toggle
+document.getElementById('settingsToggle').addEventListener('click', () => {
+    const settings = document.getElementById('advancedSettings');
+    settings.classList.toggle('hidden');
+    const btn = document.getElementById('settingsToggle');
+    btn.textContent = settings.classList.contains('hidden') ? 
+        '⚙️ Advanced Settings' : '❌ Close Settings';
+});
+
+// Load saved settings from localStorage
+function loadSettings() {
+    const settings = JSON.parse(localStorage.getItem('stockCalcSettings') || '{}');
+    Object.keys(settings).forEach(key => {
+        const element = document.getElementById(key);
+        if (element) {
+            element.value = settings[key];
+        }
+    });
+}
+
+// Save settings to localStorage
+document.getElementById('saveSettings').addEventListener('click', () => {
+    const settings = {};
+    const inputs = document.querySelectorAll('#advancedSettings input, #advancedSettings select');
+    inputs.forEach(input => {
+        if (input.id) {
+            settings[input.id] = input.type === 'number' ? parseFloat(input.value) : input.value;
+        }
+    });
+    localStorage.setItem('stockCalcSettings', JSON.stringify(settings));
+    alert('Settings saved!');
+});
+
+// Reset to defaults
+document.getElementById('resetSettings').addEventListener('click', () => {
+    if (confirm('Reset all settings to defaults?')) {
+        localStorage.removeItem('stockCalcSettings');
+        location.reload();
+    }
+});
+
+// Load settings on page load
+loadSettings();
+
 document.getElementById('analyzeBtn').addEventListener('click', async () => {
     const ticker = document.getElementById('ticker').value.trim().toUpperCase();
     const startDate = document.getElementById('startDate').value;
@@ -27,7 +71,11 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         const riskPercent = parseFloat(document.getElementById('riskPercent').value) || 2;
         const stopLossPercent = parseFloat(document.getElementById('stopLossPercent').value) || 5;
         const takeProfitPercent = parseFloat(document.getElementById('takeProfitPercent').value) || 10;
-        analyzeStock(data, ticker, forecastMonths, buyPrice, numShares, riskPercent, stopLossPercent, takeProfitPercent);
+        
+        // Get customizable parameters
+        const params = getAnalysisParameters();
+        
+        analyzeStock(data, ticker, forecastMonths, buyPrice, numShares, riskPercent, stopLossPercent, takeProfitPercent, params);
         document.getElementById('loading').classList.add('hidden');
         document.getElementById('results').classList.remove('hidden');
     } catch (error) {
@@ -35,6 +83,30 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         showError(error.message);
     }
 });
+
+function getAnalysisParameters() {
+    return {
+        volDecay: parseFloat(document.getElementById('volDecay').value) || 0.9,
+        momentumFactor: parseFloat(document.getElementById('momentumFactor').value) || 0.3,
+        energyBarrierFactor: parseFloat(document.getElementById('energyBarrierFactor').value) || 0.01,
+        demonEfficiencyAdjust: parseFloat(document.getElementById('demonEfficiencyAdjust').value) || 1.0,
+        rsiPeriod: parseInt(document.getElementById('rsiPeriod').value) || 14,
+        macdFast: parseInt(document.getElementById('macdFast').value) || 12,
+        macdSlow: parseInt(document.getElementById('macdSlow').value) || 26,
+        sma20Period: parseInt(document.getElementById('sma20Period').value) || 20,
+        sma50Period: parseInt(document.getElementById('sma50Period').value) || 50,
+        rsiOversold: parseInt(document.getElementById('rsiOversold').value) || 30,
+        rsiOverbought: parseInt(document.getElementById('rsiOverbought').value) || 70,
+        signalBuyThreshold: parseFloat(document.getElementById('signalBuyThreshold').value) || 1,
+        signalStrongBuyThreshold: parseFloat(document.getElementById('signalStrongBuyThreshold').value) || 2,
+        signalRsiWeight: parseFloat(document.getElementById('signalRsiWeight').value) || 1,
+        signalMacdWeight: parseFloat(document.getElementById('signalMacdWeight').value) || 1,
+        signalMaWeight: parseFloat(document.getElementById('signalMaWeight').value) || 1.5,
+        signalTrendWeight: parseFloat(document.getElementById('signalTrendWeight').value) || 1,
+        entropyBins: parseInt(document.getElementById('entropyBins').value) || 10,
+        informationFlowWindow: parseInt(document.getElementById('informationFlowWindow').value) || 6
+    };
+}
 
 async function fetchStockData(ticker, startDate, endDate) {
     const period1 = Math.floor(new Date(startDate).getTime() / 1000);
@@ -258,7 +330,14 @@ function parseCSVLine(line) {
     return result;
 }
 
-function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShares = 1, riskPercent = 2, stopLossPercent = 5, takeProfitPercent = 10) {
+function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShares = 1, riskPercent = 2, stopLossPercent = 5, takeProfitPercent = 10, params = {}) {
+    // Use provided parameters or defaults
+    const volDecay = params.volDecay || 0.9;
+    const momentumFactor = params.momentumFactor || 0.3;
+    const energyBarrierFactor = params.energyBarrierFactor || 0.01;
+    const demonEfficiencyAdjust = params.demonEfficiencyAdjust || 1.0;
+    const entropyBins = params.entropyBins || 10;
+    const informationFlowWindow = params.informationFlowWindow || 6;
     if (data.length < 2) {
         throw new Error('Insufficient data for analysis');
     }
@@ -273,12 +352,26 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         delta_S.push(monthly[i] - monthly[i - 1]);
     }
 
-    // Decompose into planned (ΔP_t) and unexpected (ΔU_t)
+    // Maxwell Demon Model: Information Entropy and Energy State Decomposition
+    // Calculate price states as energy levels
+    const priceStates = calculatePriceEnergyStates(monthly);
+    
+    // Calculate Shannon entropy (information entropy) for price movements
+    const informationEntropy = calculateShannonEntropy(delta_S.slice(1), entropyBins);
+    
+    // Calculate energy barrier (resistance to price change)
+    const energyBarrier = calculateEnergyBarrier(monthly);
+    
+    // Decompose using Maxwell Demon: Information-guided separation
+    // Demon uses information to selectively allow transitions
+    const demonDecomposition = maxwellDemonDecomposition(delta_S, monthly, informationEntropy);
+    
     const avg_change = delta_S.slice(1).reduce((a, b) => a + b, 0) / (delta_S.length - 1);
-    const delta_P = new Array(delta_S.length).fill(avg_change);
-    delta_P[0] = 0;
-
-    const delta_U = delta_S.map((ds, i) => ds - delta_P[i]);
+    const delta_P = demonDecomposition.planned;
+    const delta_U = demonDecomposition.unexpected;
+    
+    // Calculate information flow (how much information is available for prediction)
+    const informationFlow = calculateInformationFlow(delta_U, informationEntropy);
 
     // Reconstruct price path (deterministic)
     const S0 = monthly[0];
@@ -289,15 +382,33 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         sim_prices_det.push(S_new);
     }
 
-    // Simulate stochastic future path
+    // Simulate stochastic future path using Maxwell Demon model
+    // Demon selects transitions based on information content
     const delta_U_std = calculateStdDev(delta_U.slice(1));
     const sim_prices_stoch = [S0];
-    // Use a simple seeded random for reproducibility
     let seed = 42;
+    
+    // Current energy state
+    let currentEnergyState = priceStates && priceStates.length > 0 ? 
+        priceStates[priceStates.length - 1] : 
+        { price: S0, energy: 0, energyLevel: 0 };
+    
     for (let i = 1; i < monthly.length; i++) {
-        const random_U = seededNormal(seed + i, 0, delta_U_std);
-        const S_new = sim_prices_stoch[i - 1] + delta_P[i] + random_U;
+        // Maxwell Demon intervention: selective transition based on information
+        const demonTransition = maxwellDemonTransition(
+            currentEnergyState,
+            delta_P[i],
+            delta_U_std,
+            informationFlow,
+            seed + i,
+            energyBarrierFactor
+        );
+        
+        const S_new = sim_prices_stoch[i - 1] + demonTransition;
         sim_prices_stoch.push(S_new);
+        
+        // Update energy state
+        currentEnergyState = { price: S_new, energy: S_new - S0, energyLevel: Math.log(Math.abs(S_new - S0) + 1) };
     }
 
     // Generate future predictions if requested
@@ -311,69 +422,152 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         const lastDate = dates[dates.length - 1];
         const lastPrice = monthly[monthly.length - 1];
         
-        // Calculate volatility clustering (GARCH-like model)
-        // This accounts for volatility clustering where high volatility tends to follow high volatility
+        // Maxwell Demon Forecast: Information-guided predictions
+        // Demon uses entropy and energy barriers to predict transitions
+        
         const volatilitySeries = [];
         for (let i = 1; i < delta_U.length; i++) {
             const vol = Math.abs(delta_U[i]);
             volatilitySeries.push(vol);
         }
         
-        // Calculate recent volatility (short-term) vs long-term average
-        const recentVolWindow = Math.min(6, Math.floor(volatilitySeries.length / 2));
+        const recentVolWindow = Math.min(informationFlowWindow || 6, Math.floor(volatilitySeries.length / 2));
         const recentVol = volatilitySeries.slice(-recentVolWindow).reduce((a, b) => a + b, 0) / recentVolWindow;
         const longTermVol = delta_U_std;
-        const volRatio = recentVol / longTermVol; // Volatility adjustment factor
+        const volRatio = recentVol / longTermVol;
         
-        // Generate future dates (monthly intervals)
         predictedDates = [];
         predictedPrices = [lastPrice];
         predictedPricesOptimistic = [lastPrice];
         predictedPricesPessimistic = [lastPrice];
         
-        // Current volatility state (for clustering)
+        // Current energy state for predictions
+        let currentEnergyState = { 
+            price: lastPrice, 
+            energy: lastPrice - S0,
+            energyLevel: Math.log(Math.abs(lastPrice - S0) + 1)
+        };
         let currentVolatility = delta_U_std * volRatio;
-        const volDecay = 0.9; // Volatility tends to mean-revert
+        const volDecayParam = volDecay || 0.9;
+        
+        // Maxwell Demon prediction parameters
+        const temperature = calculateMarketTemperature(delta_U); // Market "temperature" (volatility)
+        const maxEntropy = Math.log(Math.max(delta_S.length, 2));
+        let demonEfficiency = maxEntropy > 0 ? 1 - (informationEntropy / maxEntropy) : 0.5; // Demon's information efficiency
+        demonEfficiency *= (demonEfficiencyAdjust || 1.0); // Apply user adjustment
         
         for (let i = 1; i <= forecastMonths; i++) {
             const nextDate = new Date(lastDate);
             nextDate.setMonth(nextDate.getMonth() + i);
             predictedDates.push(nextDate);
             
-            // Base prediction: use average planned change
+            // Base prediction using Maxwell Demon model
             const baseChange = avg_change;
             
-            // Adjust volatility with clustering effect (volatility persistence + mean reversion)
-            currentVolatility = currentVolatility * volDecay + delta_U_std * (1 - volDecay);
+            // Volatility clustering with entropy decay
+            currentVolatility = currentVolatility * volDecayParam + delta_U_std * (1 - volDecayParam);
             
-            // Add momentum factor based on recent trend
+            // Momentum with energy barrier consideration
             const recentTrend = monthly.length >= 3 ? 
                 (monthly[monthly.length - 1] - monthly[monthly.length - 3]) / 3 : 0;
-            const momentumAdjustment = recentTrend * 0.3; // Dampened momentum
+            const momentumAdjustment = recentTrend * (momentumFactor || 0.3);
             
-            // Generate multiple scenarios with volatility clustering
-            // Optimistic: avg_change + momentum + 0.5 * adjusted_std
-            // Pessimistic: avg_change + momentum - 0.5 * adjusted_std
-            // Base: avg_change + momentum + random noise with adjusted volatility
-            const optimisticChange = baseChange + momentumAdjustment + 0.5 * currentVolatility;
-            const pessimisticChange = baseChange + momentumAdjustment - 0.5 * currentVolatility;
-            const randomChange = baseChange + momentumAdjustment + seededNormal(seed + 1000 + i, 0, currentVolatility);
+            // Maxwell Demon transition: Selective based on information and energy barriers
+            // Demon allows transitions that reduce entropy (increase information)
+            const demonOptimistic = maxwellDemonForecast(
+                currentEnergyState,
+                baseChange + momentumAdjustment,
+                currentVolatility * 0.5,
+                informationFlow,
+                temperature,
+                demonEfficiency,
+                seed + 1000 + i,
+                'optimistic',
+                energyBarrierFactor
+            );
             
-            predictedPrices.push(predictedPrices[predictedPrices.length - 1] + randomChange);
-            predictedPricesOptimistic.push(predictedPricesOptimistic[predictedPricesOptimistic.length - 1] + optimisticChange);
-            predictedPricesPessimistic.push(predictedPricesPessimistic[predictedPricesPessimistic.length - 1] + pessimisticChange);
+            const demonPessimistic = maxwellDemonForecast(
+                currentEnergyState,
+                baseChange + momentumAdjustment,
+                -currentVolatility * 0.5,
+                informationFlow,
+                temperature,
+                demonEfficiency,
+                seed + 1000 + i,
+                'pessimistic',
+                energyBarrierFactor
+            );
+            
+            const demonBase = maxwellDemonForecast(
+                currentEnergyState,
+                baseChange + momentumAdjustment,
+                0,
+                informationFlow,
+                temperature,
+                demonEfficiency,
+                seed + 1000 + i,
+                'base',
+                energyBarrierFactor
+            );
+            
+            predictedPrices.push(predictedPrices[predictedPrices.length - 1] + demonBase);
+            predictedPricesOptimistic.push(predictedPricesOptimistic[predictedPricesOptimistic.length - 1] + demonOptimistic);
+            predictedPricesPessimistic.push(predictedPricesPessimistic[predictedPricesPessimistic.length - 1] + demonPessimistic);
+            
+            // Update energy state
+            const newPrice = predictedPrices[predictedPrices.length - 1];
+            currentEnergyState = {
+                price: newPrice,
+                energy: newPrice - S0,
+                energyLevel: Math.log(Math.abs(newPrice - S0) + 1)
+            };
         }
         
         finalPredictedPrice = predictedPrices[predictedPrices.length - 1];
     }
 
-    // Update statistics
+    // Update statistics (including Maxwell Demon metrics)
     document.getElementById('startingPrice').textContent = `$${S0.toFixed(2)}`;
     document.getElementById('avgChange').textContent = `$${avg_change.toFixed(2)}`;
     document.getElementById('stdDev').textContent = `$${delta_U_std.toFixed(2)}`;
     document.getElementById('finalActual').textContent = `$${monthly[monthly.length - 1].toFixed(2)}`;
     document.getElementById('finalDet').textContent = `$${sim_prices_det[sim_prices_det.length - 1].toFixed(2)}`;
     document.getElementById('finalStoch').textContent = `$${sim_prices_stoch[sim_prices_stoch.length - 1].toFixed(2)}`;
+    
+    // Store Maxwell Demon metrics for display
+    const marketTemp = calculateMarketTemperature(delta_U);
+    const demonEff = 1 - (informationEntropy / Math.log(Math.max(delta_S.length, 2)));
+    
+    window.maxwellDemonMetrics = {
+        entropy: informationEntropy,
+        energyBarrier: energyBarrier,
+        informationFlow: informationFlow,
+        temperature: marketTemp,
+        demonEfficiency: demonEff
+    };
+    
+    // Display Maxwell Demon metrics
+    const entropyCard = document.getElementById('entropyCard');
+    const demonEfficiencyCard = document.getElementById('demonEfficiencyCard');
+    const temperatureCard = document.getElementById('temperatureCard');
+    
+    if (entropyCard) {
+        entropyCard.style.display = 'block';
+        document.getElementById('entropyValue').textContent = informationEntropy.toFixed(3);
+        document.getElementById('entropyValue').title = 'Shannon Entropy: Higher = More Uncertainty';
+    }
+    
+    if (demonEfficiencyCard) {
+        demonEfficiencyCard.style.display = 'block';
+        document.getElementById('demonEfficiency').textContent = `${(demonEff * 100).toFixed(1)}%`;
+        document.getElementById('demonEfficiency').title = 'Demon Efficiency: How well information separates signals';
+    }
+    
+    if (temperatureCard) {
+        temperatureCard.style.display = 'block';
+        document.getElementById('temperatureValue').textContent = `$${marketTemp.toFixed(2)}`;
+        document.getElementById('temperatureValue').title = 'Market Temperature: Volatility measure';
+    }
     
     // Show/hide prediction card
     const predictionCard = document.getElementById('predictionCard');
@@ -388,11 +582,11 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
     // Calculate and display profit if buy price is provided
     calculateProfit(buyPrice, numShares, monthly[monthly.length - 1], finalPredictedPrice, forecastMonths);
 
-    // Calculate technical indicators
-    const technicalIndicators = calculateTechnicalIndicators(monthly, dates);
+    // Calculate technical indicators with customizable parameters
+    const technicalIndicators = calculateTechnicalIndicators(monthly, dates, params);
     
-    // Generate trading signals
-    const signals = generateTradingSignals(technicalIndicators, monthly);
+    // Generate trading signals with customizable weights
+    const signals = generateTradingSignals(technicalIndicators, monthly, params);
     
     // Display trading signals and market context
     displayTradingSignals(signals, technicalIndicators, monthly[monthly.length - 1]);
@@ -482,6 +676,214 @@ function calculateStdDev(values) {
     return Math.sqrt(variance);
 }
 
+// ========== MAXWELL DEMON MODEL FUNCTIONS ==========
+
+/**
+ * Calculate price states as energy levels
+ * Energy = Price relative to baseline (analogous to potential energy)
+ */
+function calculatePriceEnergyStates(prices) {
+    if (prices.length < 2) return [];
+    const baseline = prices[0];
+    return prices.map((price, i) => ({
+        index: i,
+        price: price,
+        energy: price - baseline,
+        energyLevel: Math.log(Math.abs(price - baseline) + 1) // Logarithmic energy scale
+    }));
+}
+
+/**
+ * Calculate Shannon entropy (information entropy) for price movements
+ * H(X) = -Σ p(x) log(p(x))
+ * Higher entropy = more uncertainty/information needed
+ */
+function calculateShannonEntropy(values, bins = 10) {
+    if (values.length < 2) return 0;
+    
+    // Discretize values into bins for probability calculation
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const binSize = (max - min) / bins;
+    
+    if (binSize === 0) return 0;
+    
+    const counts = new Array(bins).fill(0);
+    values.forEach(val => {
+        const binIndex = Math.min(Math.floor((val - min) / binSize), bins - 1);
+        counts[binIndex]++;
+    });
+    
+    let entropy = 0;
+    counts.forEach(count => {
+        if (count > 0) {
+            const probability = count / values.length;
+            entropy -= probability * Math.log2(probability);
+        }
+    });
+    
+    return entropy;
+}
+
+/**
+ * Calculate energy barrier (resistance to price transitions)
+ * Based on volatility and trend strength
+ */
+function calculateEnergyBarrier(prices) {
+    if (prices.length < 2) return 0;
+    
+    const returns = [];
+    for (let i = 1; i < prices.length; i++) {
+        returns.push(Math.abs((prices[i] - prices[i - 1]) / prices[i - 1]));
+    }
+    
+    const avgVolatility = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const priceRange = Math.max(...prices) - Math.min(...prices);
+    const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+    
+    // Energy barrier = normalized volatility * price range / average price
+    return avgVolatility * (priceRange / avgPrice);
+}
+
+/**
+ * Maxwell Demon Decomposition
+ * Demon uses information to selectively separate planned vs unexpected changes
+ * More information = better separation
+ */
+function maxwellDemonDecomposition(delta_S, prices, entropy) {
+    const avg_change = delta_S.slice(1).reduce((a, b) => a + b, 0) / (delta_S.length - 1);
+    
+    // Demon efficiency: how well can demon separate signals
+    // Lower entropy = more information = better separation
+    const maxEntropy = Math.log2(delta_S.length);
+    const demonEfficiency = 1 - (entropy / maxEntropy);
+    
+    const planned = [];
+    const unexpected = [];
+    
+    for (let i = 0; i < delta_S.length; i++) {
+        if (i === 0) {
+            planned.push(0);
+            unexpected.push(0);
+        } else {
+            // Demon's separation: uses information to identify "predictable" component
+            // Planned = component that reduces entropy (more predictable)
+            // Unexpected = component that increases entropy (less predictable)
+            
+            const change = delta_S[i];
+            const predicted = avg_change;
+            const residual = change - predicted;
+            
+            // Demon's selective filtering: weight by information content
+            // Changes that are "typical" (low entropy) are more "planned"
+            // Changes that are "atypical" (high entropy) are more "unexpected"
+            
+            const typicality = Math.exp(-Math.abs(residual) / (2 * Math.pow(calculateStdDev(delta_S.slice(1)), 2)));
+            const plannedComponent = predicted * (1 + demonEfficiency * typicality);
+            const unexpectedComponent = residual * (1 - demonEfficiency * typicality);
+            
+            planned.push(plannedComponent);
+            unexpected.push(change - plannedComponent);
+        }
+    }
+    
+    return { planned, unexpected };
+}
+
+/**
+ * Calculate information flow
+ * Measures how much information is available for prediction
+ */
+function calculateInformationFlow(unexpectedChanges, entropy) {
+    if (unexpectedChanges.length < 2) return 0;
+    
+    // Information flow = mutual information between consecutive changes
+    // Simplified: correlation-adjusted entropy reduction
+    let correlation = 0;
+    if (unexpectedChanges.length >= 3) {
+        const x = unexpectedChanges.slice(0, -1);
+        const y = unexpectedChanges.slice(1);
+        const meanX = x.reduce((a, b) => a + b, 0) / x.length;
+        const meanY = y.reduce((a, b) => a + b, 0) / y.length;
+        
+        let cov = 0;
+        let varX = 0;
+        let varY = 0;
+        for (let i = 0; i < x.length; i++) {
+            cov += (x[i] - meanX) * (y[i] - meanY);
+            varX += Math.pow(x[i] - meanX, 2);
+            varY += Math.pow(y[i] - meanY, 2);
+        }
+        
+        if (varX > 0 && varY > 0) {
+            correlation = cov / Math.sqrt(varX * varY);
+        }
+    }
+    
+    // Information flow = entropy reduction potential
+    // Higher correlation = more predictable = higher information flow
+    return Math.abs(correlation) * (1 - entropy / Math.log2(unexpectedChanges.length));
+}
+
+/**
+ * Calculate market "temperature" (volatility)
+ * Analogous to thermodynamic temperature
+ */
+function calculateMarketTemperature(unexpectedChanges) {
+    if (unexpectedChanges.length < 2) return 0;
+    const variance = unexpectedChanges.slice(1).reduce((sum, val) => sum + Math.pow(val, 2), 0) / unexpectedChanges.length;
+    return Math.sqrt(variance); // Temperature = volatility
+}
+
+/**
+ * Maxwell Demon Transition
+ * Demon selectively allows transitions based on information content
+ * Similar to how Maxwell's Demon selects fast molecules
+ */
+function maxwellDemonTransition(currentState, plannedChange, volatility, informationFlow, seed, energyBarrierFactor = 0.01) {
+    // Random component
+    const randomChange = seededNormal(seed, 0, volatility);
+    
+    // Demon's selection: prefers transitions that increase information (decrease entropy)
+    // Demon "knows" which direction reduces entropy based on information flow
+    const demonPreference = informationFlow > 0 ? 
+        Math.sign(plannedChange) * Math.abs(randomChange) * informationFlow : 
+        randomChange;
+    
+    // Energy barrier: transitions require overcoming barrier
+    const energyBarrier = Math.abs(currentState.energy) * (energyBarrierFactor || 0.01); // Small barrier proportional to energy
+    const barrierEffect = Math.exp(-energyBarrier / (volatility + 0.001)); // Boltzmann-like factor
+    
+    return plannedChange + demonPreference * barrierEffect;
+}
+
+/**
+ * Maxwell Demon Forecast
+ * Predicts future transitions using information-guided selection
+ */
+function maxwellDemonForecast(currentState, baseChange, volatilityBias, informationFlow, temperature, demonEfficiency, seed, scenario, energyBarrierFactor = 0.01) {
+    // Random component
+    const baseVolatility = Math.abs(volatilityBias) || temperature;
+    let randomComponent = seededNormal(seed, 0, baseVolatility);
+    
+    if (scenario === 'optimistic') {
+        randomComponent = Math.abs(randomComponent);
+    } else if (scenario === 'pessimistic') {
+        randomComponent = -Math.abs(randomComponent);
+    }
+    
+    // Demon's information-guided adjustment
+    // Demon uses information to prefer entropy-reducing transitions
+    const demonAdjustment = informationFlow * demonEfficiency * Math.sign(baseChange) * Math.abs(randomComponent);
+    
+    // Energy barrier effect (Boltzmann factor)
+    const energyBarrier = Math.abs(currentState.energy) * (energyBarrierFactor || 0.01);
+    const boltzmannFactor = Math.exp(-energyBarrier / (temperature + 0.001));
+    
+    // Final transition: planned + demon-selected unexpected
+    return baseChange + (randomComponent + demonAdjustment) * boltzmannFactor;
+}
+
 // Technical Indicators
 function calculateRSI(prices, period = 14) {
     if (prices.length < period + 1) return null;
@@ -504,6 +906,7 @@ function calculateRSI(prices, period = 14) {
 }
 
 function calculateMACD(prices, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+    if (!prices || prices.length < slowPeriod) return null;
     if (prices.length < slowPeriod) return null;
     
     const emaFast = calculateEMA(prices, fastPeriod);
@@ -628,44 +1031,61 @@ function calculateSupportResistance(prices, lookback = 50) {
     return { support, resistance, position, currentPrice };
 }
 
-function calculateTechnicalIndicators(prices, dates) {
+function calculateTechnicalIndicators(prices, dates, params = {}) {
+    const rsiPeriod = params.rsiPeriod || 14;
+    const macdFast = params.macdFast || 12;
+    const macdSlow = params.macdSlow || 26;
+    const sma20Period = params.sma20Period || 20;
+    const sma50Period = params.sma50Period || 50;
+    
     return {
-        rsi: calculateRSI(prices),
-        macd: calculateMACD(prices),
-        sma20: calculateMovingAverage(prices, 20),
-        sma50: calculateMovingAverage(prices, 50),
+        rsi: calculateRSI(prices, rsiPeriod),
+        macd: calculateMACD(prices, macdFast, macdSlow),
+        sma20: calculateMovingAverage(prices, sma20Period),
+        sma50: calculateMovingAverage(prices, sma50Period),
         bollingerBands: calculateBollingerBands(prices),
         volatility: calculateVolatilityRegime(prices),
         trend: calculateTrendStrength(prices),
         supportResistance: calculateSupportResistance(prices),
-        currentPrice: prices[prices.length - 1]
+        currentPrice: prices[prices.length - 1],
+        params: params // Store params for signal generation
     };
 }
 
-function generateTradingSignals(indicators, prices) {
+function generateTradingSignals(indicators, prices, params = {}) {
     const signals = [];
     let overallSignal = 'HOLD';
     let signalStrength = 0;
     
+    // Get customizable weights and thresholds
+    const rsiOversold = params.rsiOversold || 30;
+    const rsiOverbought = params.rsiOverbought || 70;
+    const signalRsiWeight = params.signalRsiWeight || 1;
+    const signalMacdWeight = params.signalMacdWeight || 1;
+    const signalMaWeight = params.signalMaWeight || 1.5;
+    const signalTrendWeight = params.signalTrendWeight || 1;
+    const buyThreshold = params.signalBuyThreshold || 1;
+    const strongBuyThreshold = params.signalStrongBuyThreshold || 2;
+    
     // RSI signals
     if (indicators.rsi !== null) {
-        if (indicators.rsi < 30) {
-            signals.push({ type: 'BUY', source: 'RSI Oversold', strength: 1 });
-            signalStrength += 1;
-        } else if (indicators.rsi > 70) {
-            signals.push({ type: 'SELL', source: 'RSI Overbought', strength: 1 });
-            signalStrength -= 1;
+        if (indicators.rsi < rsiOversold) {
+            signals.push({ type: 'BUY', source: 'RSI Oversold', strength: signalRsiWeight });
+            signalStrength += signalRsiWeight;
+        } else if (indicators.rsi > rsiOverbought) {
+            signals.push({ type: 'SELL', source: 'RSI Overbought', strength: signalRsiWeight });
+            signalStrength -= signalRsiWeight;
         }
     }
     
     // MACD signals
     if (indicators.macd !== null) {
         if (indicators.macd.histogram > 0 && indicators.macd.macd > indicators.macd.signal) {
-            signals.push({ type: 'BUY', source: 'MACD Bullish', strength: 1 });
-            signalStrength += 1;
+            signals.push({ type: 'BUY', source: 'MACD Bullish', strength: signalMacdWeight });
+            signalStrength += signalMacdWeight;
         } else if (indicators.macd.histogram < 0 && indicators.macd.macd < indicators.macd.signal) {
-            signals.push({ type: 'SELL', source: 'MACD Bearish', strength: 1 });
-            signalStrength -= 1;
+            signals.push({ type: 'SELL', source: 'MACD Bearish', strength: signalMacdWeight });
+            signalStrength -= signalMacdWeight;
         }
     }
     
@@ -673,21 +1093,21 @@ function generateTradingSignals(indicators, prices) {
     const currentPrice = prices[prices.length - 1];
     if (indicators.sma20 !== null && indicators.sma50 !== null) {
         if (currentPrice > indicators.sma20 && indicators.sma20 > indicators.sma50) {
-            signals.push({ type: 'BUY', source: 'Golden Cross', strength: 1.5 });
-            signalStrength += 1.5;
+            signals.push({ type: 'BUY', source: 'Golden Cross', strength: signalMaWeight });
+            signalStrength += signalMaWeight;
         } else if (currentPrice < indicators.sma20 && indicators.sma20 < indicators.sma50) {
-            signals.push({ type: 'SELL', source: 'Death Cross', strength: 1.5 });
-            signalStrength -= 1.5;
+            signals.push({ type: 'SELL', source: 'Death Cross', strength: signalMaWeight });
+            signalStrength -= signalMaWeight;
         }
     }
     
     // Trend strength signals
     if (indicators.trend.direction === 'Bullish' && indicators.trend.strength > 50) {
-        signals.push({ type: 'BUY', source: 'Strong Uptrend', strength: 1 });
-        signalStrength += 1;
+        signals.push({ type: 'BUY', source: 'Strong Uptrend', strength: signalTrendWeight });
+        signalStrength += signalTrendWeight;
     } else if (indicators.trend.direction === 'Bearish' && indicators.trend.strength > 50) {
-        signals.push({ type: 'SELL', source: 'Strong Downtrend', strength: 1 });
-        signalStrength -= 1;
+        signals.push({ type: 'SELL', source: 'Strong Downtrend', strength: signalTrendWeight });
+        signalStrength -= signalTrendWeight;
     }
     
     // Support/Resistance signals
@@ -699,11 +1119,11 @@ function generateTradingSignals(indicators, prices) {
         signalStrength -= 0.5;
     }
     
-    // Determine overall signal
-    if (signalStrength >= 2) overallSignal = 'STRONG BUY';
-    else if (signalStrength >= 1) overallSignal = 'BUY';
-    else if (signalStrength <= -2) overallSignal = 'STRONG SELL';
-    else if (signalStrength <= -1) overallSignal = 'SELL';
+    // Determine overall signal using customizable thresholds
+    if (signalStrength >= strongBuyThreshold) overallSignal = 'STRONG BUY';
+    else if (signalStrength >= buyThreshold) overallSignal = 'BUY';
+    else if (signalStrength <= -strongBuyThreshold) overallSignal = 'STRONG SELL';
+    else if (signalStrength <= -buyThreshold) overallSignal = 'SELL';
     
     return {
         overall: overallSignal,
@@ -738,8 +1158,10 @@ function displayTradingSignals(signals, indicators, currentPrice) {
     if (indicators.rsi !== null) {
         document.getElementById('rsiValue').textContent = indicators.rsi.toFixed(2);
         let rsiInterp = 'Neutral';
-        if (indicators.rsi < 30) rsiInterp = 'Oversold (Buy Signal)';
-        else if (indicators.rsi > 70) rsiInterp = 'Overbought (Sell Signal)';
+        const rsiOversold = (indicators.params && indicators.params.rsiOversold) || 30;
+        const rsiOverbought = (indicators.params && indicators.params.rsiOverbought) || 70;
+        if (indicators.rsi < rsiOversold) rsiInterp = 'Oversold (Buy Signal)';
+        else if (indicators.rsi > rsiOverbought) rsiInterp = 'Overbought (Sell Signal)';
         else if (indicators.rsi < 50) rsiInterp = 'Bearish';
         else rsiInterp = 'Bullish';
         document.getElementById('rsiInterpretation').textContent = rsiInterp;
