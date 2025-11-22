@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profits of Ball</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚾ Profits of Ball</h1>
+            <p class="subtitle">Analyze stock movements with planned vs unexpected changes</p>
+            <p class="note">Works with any stock ticker symbol (e.g., AAPL, MSFT, GOOGL, TSLA)</p>
+        </header>
+
+        <div class="legal-warning top-warning">
+            <div class="warning-content">
+                <strong>⚠️ IMPORTANT DISCLAIMER & RISK WARNING</strong>
+                <p>This tool provides stock analysis and price predictions for informational and educational purposes only. <strong>All predictions, forecasts, and projections are not guaranteed and should not be relied upon for investment decisions.</strong> Past performance does not guarantee future results. Stock market investments carry substantial risk of loss. You may lose all or more than your initial investment. This is not financial, investment, or trading advice. The predictions generated are based on mathematical models and historical data, which may not reflect future market conditions. Before making any investment decisions, consult with a qualified financial advisor and conduct your own thorough research. Trading stocks involves significant risk of financial loss. By using this tool, you acknowledge and agree that you understand these risks.</p>
+            </div>
+        </div>
+
+        <div class="input-section">
+            <div class="input-group">
+                <label for="ticker">Stock Ticker:</label>
+                <input type="text" id="ticker" placeholder="e.g., AAPL, MSFT, GOOGL" value="AAPL" maxlength="10">
+            </div>
+            <div class="input-group">
+                <label for="startDate">Start Date:</label>
+                <input type="date" id="startDate" value="2024-01-01">
+            </div>
+            <div class="input-group">
+                <label for="endDate">End Date:</label>
+                <input type="date" id="endDate">
+            </div>
+            <div class="input-group">
+                <label for="forecastMonths">Forecast Future (months):</label>
+                <input type="number" id="forecastMonths" placeholder="0" value="0" min="0" max="24" step="1">
+            </div>
+            <div class="input-group">
+                <label for="buyPrice">Buy Price ($):</label>
+                <input type="number" id="buyPrice" placeholder="e.g., 150.00" step="0.01" min="0">
+            </div>
+            <div class="input-group">
+                <label for="numShares">Number of Shares:</label>
+                <input type="number" id="numShares" placeholder="e.g., 100" value="1" min="1" step="1">
+            </div>
+            <button id="analyzeBtn" class="btn-primary">Analyze Stock</button>
+        </div>
+
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Loading stock data...</p>
+        </div>
+
+        <div id="error" class="error hidden"></div>
+
+        <div id="results" class="results hidden">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Starting Price</h3>
+                    <p class="stat-value" id="startingPrice">-</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Avg Planned Change (ΔP)</h3>
+                    <p class="stat-value" id="avgChange">-</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Std Dev of Unexpected (ΔU)</h3>
+                    <p class="stat-value" id="stdDev">-</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Final Actual Price</h3>
+                    <p class="stat-value" id="finalActual">-</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Final Deterministic</h3>
+                    <p class="stat-value" id="finalDet">-</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Final Stochastic</h3>
+                    <p class="stat-value" id="finalStoch">-</p>
+                </div>
+                <div class="stat-card prediction-card" id="predictionCard" style="display: none;">
+                    <h3>Predicted Price</h3>
+                    <p class="stat-value" id="predictedPrice">-</p>
+                </div>
+            </div>
+
+            <div id="profitSection" class="profit-section hidden">
+                <h2>💰 Profit Analysis</h2>
+                <div class="profit-grid">
+                    <div class="profit-card" id="currentProfitCard">
+                        <h3>Current Profit/Loss</h3>
+                        <p class="profit-value" id="currentProfit">-</p>
+                        <p class="profit-percentage" id="currentProfitPercent">-</p>
+                        <p class="profit-details" id="currentProfitDetails">-</p>
+                    </div>
+                    <div class="profit-card prediction-card" id="predictedProfitCard" style="display: none;">
+                        <h3>Predicted Profit/Loss</h3>
+                        <p class="profit-value" id="predictedProfit">-</p>
+                        <p class="profit-percentage" id="predictedProfitPercent">-</p>
+                        <p class="profit-details" id="predictedProfitDetails">-</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="priceChart"></canvas>
+            </div>
+
+            <div class="big-moves-section">
+                <h2>Big Moves (Unexpected Changes)</h2>
+                <div id="bigMovesList" class="big-moves-list"></div>
+            </div>
+        </div>
+
+        <footer class="legal-footer">
+            <div class="footer-content">
+                <h3>Legal Disclaimers & Risk Warnings</h3>
+                <div class="disclaimer-section">
+                    <h4>Investment Risk Warning (USA & UK)</h4>
+                    <p><strong>All investments carry risk. You may lose money.</strong> Stock prices can be volatile and unpredictable. Past performance is not indicative of future results. Price predictions and forecasts shown on this platform are for informational purposes only and should not be construed as financial advice, investment recommendations, or guarantees of future performance.</p>
+                </div>
+                <div class="disclaimer-section">
+                    <h4>Not Financial Advice</h4>
+                    <p>This tool does not provide personalized investment, financial, legal, or tax advice. The analysis and predictions generated are based on mathematical models and historical data patterns. Market conditions change, and predictions may not reflect actual future performance. Always consult with a licensed financial advisor, accountant, or attorney regarding your specific financial situation before making investment decisions.</p>
+                </div>
+                <div class="disclaimer-section">
+                    <h4>No Guarantees</h4>
+                    <p>All forecasts, projections, and predictions are estimates only and are not guaranteed to be accurate. Stock market investments involve substantial risk of loss, including the potential loss of your entire investment. No representation or warranty is made that any prediction or forecast will be achieved or that any investment strategy will be successful.</p>
+                </div>
+                <div class="disclaimer-section">
+                    <h4>User Responsibility</h4>
+                    <p>You are solely responsible for all investment decisions you make. By using this tool, you acknowledge that you understand the risks associated with stock market investing and that you will not hold the creators or operators of this tool liable for any losses or damages resulting from your investment decisions based on information provided herein.</p>
+                </div>
+                <p class="footer-note"><strong>Remember:</strong> Only invest money you can afford to lose. If you are unsure about any investment, seek advice from a qualified financial advisor.</p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
+
