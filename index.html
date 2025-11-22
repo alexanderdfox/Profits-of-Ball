@@ -53,6 +53,30 @@
                 <input type="checkbox" id="enableBacktest" checked>
             </div>
             <div class="input-group">
+                <label for="backtestMode">Backtest Mode:</label>
+                <select id="backtestMode">
+                    <option value="simple">Simple</option>
+                    <option value="walkforward">Walk-Forward</option>
+                    <option value="montecarlo">Monte Carlo</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label for="enablePortfolio">Portfolio Mode:</label>
+                <input type="checkbox" id="enablePortfolio">
+            </div>
+            <div class="input-group" id="portfolioTickersGroup" style="display: none;">
+                <label for="portfolioTickers">Portfolio Tickers (comma-separated):</label>
+                <input type="text" id="portfolioTickers" placeholder="e.g., AAPL,MSFT,GOOGL,TSLA">
+            </div>
+            <div class="input-group">
+                <label for="enableOptimization">Strategy Optimization:</label>
+                <input type="checkbox" id="enableOptimization">
+            </div>
+            <div class="input-group">
+                <label for="enableRealtime">Real-time Updates:</label>
+                <input type="checkbox" id="enableRealtime">
+            </div>
+            <div class="input-group">
                 <label for="buyPrice">Buy Price ($):</label>
                 <input type="number" id="buyPrice" placeholder="e.g., 150.00" step="0.01" min="0">
             </div>
@@ -425,6 +449,99 @@
             <div class="big-moves-section">
                 <h2>Big Moves (Unexpected Changes)</h2>
                 <div id="bigMovesList" class="big-moves-list"></div>
+            </div>
+
+            <div class="portfolio-section hidden" id="portfolioSection">
+                <h2>💼 Portfolio Analysis</h2>
+                <div class="portfolio-stats-grid">
+                    <div class="portfolio-stat-card">
+                        <h3>Portfolio Value</h3>
+                        <p class="stat-value" id="portfolioValue">-</p>
+                    </div>
+                    <div class="portfolio-stat-card">
+                        <h3>Total Return</h3>
+                        <p class="stat-value" id="portfolioReturn">-</p>
+                    </div>
+                    <div class="portfolio-stat-card">
+                        <h3>Sharpe Ratio</h3>
+                        <p class="stat-value" id="portfolioSharpe">-</p>
+                    </div>
+                    <div class="portfolio-stat-card">
+                        <h3>Max Drawdown</h3>
+                        <p class="stat-value" id="portfolioDrawdown">-</p>
+                    </div>
+                    <div class="portfolio-stat-card">
+                        <h3>Correlation</h3>
+                        <p class="stat-value" id="portfolioCorrelation">-</p>
+                    </div>
+                    <div class="portfolio-stat-card">
+                        <h3>Diversification</h3>
+                        <p class="stat-value" id="portfolioDiversification">-</p>
+                    </div>
+                </div>
+                <div id="portfolioAllocations" class="portfolio-allocations"></div>
+                <div class="portfolio-chart-container">
+                    <canvas id="portfolioChart"></canvas>
+                </div>
+                <div class="portfolio-correlation-matrix">
+                    <h3>Correlation Matrix</h3>
+                    <div id="correlationMatrix"></div>
+                </div>
+            </div>
+
+            <div class="optimization-section hidden" id="optimizationSection">
+                <h2>⚙️ Strategy Optimization</h2>
+                <div class="optimization-results">
+                    <div class="optimization-summary">
+                        <h3>Optimal Parameters</h3>
+                        <div id="optimalParams" class="optimal-params"></div>
+                    </div>
+                    <div class="optimization-metrics">
+                        <h3>Optimization Metrics</h3>
+                        <div id="optimizationMetrics" class="optimization-metrics-grid"></div>
+                    </div>
+                    <div class="optimization-chart-container">
+                        <canvas id="optimizationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="montecarlo-section hidden" id="montecarloSection">
+                <h2>🎲 Monte Carlo Simulation</h2>
+                <div class="montecarlo-stats">
+                    <div class="montecarlo-stat-card">
+                        <h3>Confidence Intervals</h3>
+                        <div id="montecarloConfidence"></div>
+                    </div>
+                    <div class="montecarlo-stat-card">
+                        <h3>Risk Metrics</h3>
+                        <div id="montecarloRisk"></div>
+                    </div>
+                </div>
+                <div class="montecarlo-chart-container">
+                    <canvas id="montecarloChart"></canvas>
+                </div>
+            </div>
+
+            <div class="walkforward-section hidden" id="walkforwardSection">
+                <h2>📊 Walk-Forward Analysis</h2>
+                <div class="walkforward-stats">
+                    <div class="walkforward-stat-card">
+                        <h3>Out-of-Sample Return</h3>
+                        <p class="stat-value" id="walkforwardOOS">-</p>
+                    </div>
+                    <div class="walkforward-stat-card">
+                        <h3>Consistency</h3>
+                        <p class="stat-value" id="walkforwardConsistency">-</p>
+                    </div>
+                    <div class="walkforward-stat-card">
+                        <h3>Optimization Periods</h3>
+                        <p class="stat-value" id="walkforwardPeriods">-</p>
+                    </div>
+                </div>
+                <div class="walkforward-chart-container">
+                    <canvas id="walkforwardChart"></canvas>
+                </div>
             </div>
 
             <div class="export-section">

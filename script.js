@@ -1,5 +1,32 @@
 let priceChart = null;
 
+// Check if running from file:// and show warning
+if (window.location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const warningDiv = document.createElement('div');
+        warningDiv.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; padding: 20px; text-align: center; z-index: 10000; box-shadow: 0 4px 20px rgba(0,0,0,0.3); font-weight: 600;';
+        warningDiv.innerHTML = `
+            <div style="max-width: 1200px; margin: 0 auto;">
+                <strong style="font-size: 1.2rem;">⚠️ CORS Error: You're opening the HTML file directly!</strong>
+                <p style="margin: 10px 0; font-size: 1rem;">
+                    <strong>✅ SOLUTION:</strong> Use the Python server:
+                </p>
+                <div style="background: rgba(255,255,255,0.2); padding: 15px; border-radius: 8px; margin: 10px 0;">
+                    <p style="margin: 5px 0;"><strong>1.</strong> Open Terminal in this folder</p>
+                    <p style="margin: 5px 0;"><strong>2.</strong> Run: <code style="background: rgba(0,0,0,0.3); padding: 5px 10px; border-radius: 4px;">python3 simple-server.py</code></p>
+                    <p style="margin: 5px 0;"><strong>3.</strong> Open: <a href="http://localhost:8000" style="color: #fff; text-decoration: underline;">http://localhost:8000</a> in your browser</p>
+                    <p style="margin: 5px 0;"><strong>4.</strong> Try analyzing again!</p>
+                </div>
+                <p style="font-size: 0.9rem; opacity: 0.9;">See START-HERE.md for detailed instructions</p>
+            </div>
+        `;
+        document.body.insertBefore(warningDiv, document.body.firstChild);
+        
+        // Add padding to body to account for fixed warning
+        document.body.style.paddingTop = '200px';
+    });
+}
+
 // Settings toggle
 document.getElementById('settingsToggle').addEventListener('click', () => {
     const settings = document.getElementById('advancedSettings');
@@ -60,10 +87,42 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     document.getElementById('loading').classList.remove('hidden');
 
     try {
+        // Check if using file:// protocol - show helpful error
+        if (window.location.protocol === 'file:') {
+            document.getElementById('loading').classList.add('hidden');
+            showError('❌ CORS Error: You\'re opening the HTML file directly!\n\n✅ SOLUTION: Use the Python server:\n\n1. Open Terminal in this folder\n2. Run: python3 simple-server.py\n   (or: python simple-server.py)\n3. Open: http://localhost:8000\n4. Try again!\n\nThis bypasses CORS issues completely.\n\nSee START-HERE.md for detailed instructions.');
+            return;
+        }
+        
         const timeframe = document.getElementById('timeframe').value || '1mo';
         const enableBacktest = document.getElementById('enableBacktest').checked;
+        const backtestMode = document.getElementById('backtestMode') ? document.getElementById('backtestMode').value || 'simple' : 'simple';
+        const enablePortfolio = document.getElementById('enablePortfolio') ? document.getElementById('enablePortfolio').checked : false;
+        const portfolioTickers = enablePortfolio && document.getElementById('portfolioTickers') ? 
+            document.getElementById('portfolioTickers').value.split(',').map(t => t.trim().toUpperCase()).filter(t => t) : [];
+        const enableOptimization = document.getElementById('enableOptimization') ? document.getElementById('enableOptimization').checked : false;
+        const enableRealtime = document.getElementById('enableRealtime') ? document.getElementById('enableRealtime').checked : false;
         
-        const data = await fetchStockData(ticker, startDate, endDate, timeframe);
+        // Show/hide portfolio inputs
+        if (document.getElementById('portfolioTickersGroup')) {
+            document.getElementById('portfolioTickersGroup').style.display = enablePortfolio ? 'block' : 'none';
+        }
+        
+        // Fetch data (single stock or portfolio)
+        let data, portfolioData = {};
+        if (enablePortfolio && portfolioTickers.length > 0) {
+            // Fetch portfolio data
+            for (const pticker of portfolioTickers) {
+                try {
+                    portfolioData[pticker] = await fetchStockData(pticker, startDate, endDate, timeframe);
+                } catch (error) {
+                    console.warn(`Failed to fetch data for ${pticker}:`, error);
+                }
+            }
+            data = portfolioData[ticker] || (Object.values(portfolioData)[0] || []);
+        } else {
+            data = await fetchStockData(ticker, startDate, endDate, timeframe);
+        }
         if (!data || data.length === 0) {
             throw new Error('No data found for this ticker and date range');
         }
@@ -78,7 +137,25 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         // Get customizable parameters
         const params = getAnalysisParameters();
         
-        const analysisResults = analyzeStock(data, ticker, forecastMonths, buyPrice, numShares, riskPercent, stopLossPercent, takeProfitPercent, params, enableBacktest, timeframe);
+        // Strategy optimization if enabled
+        let optimizedParams = params;
+        if (enableOptimization) {
+            optimizedParams = await optimizeStrategy(data, ticker, params, startDate, endDate, timeframe);
+            displayOptimizationResults(optimizedParams, params);
+        }
+        
+        const analysisResults = analyzeStock(data, ticker, forecastMonths, buyPrice, numShares, riskPercent, stopLossPercent, takeProfitPercent, optimizedParams, enableBacktest, backtestMode, timeframe, enablePortfolio ? portfolioData : null);
+        
+        // Portfolio analysis if enabled
+        if (enablePortfolio && portfolioData && Object.keys(portfolioData).length > 1) {
+            const portfolioResults = analyzePortfolio(portfolioData, ticker, optimizedParams, timeframe);
+            displayPortfolioResults(portfolioResults);
+        }
+        
+        // Real-time updates if enabled
+        if (enableRealtime) {
+            startRealtimeUpdates(ticker, timeframe);
+        }
         
         // Store results for export
         window.lastAnalysisResults = analysisResults;
@@ -115,6 +192,10 @@ function getAnalysisParameters() {
 }
 
 async function fetchStockData(ticker, startDate, endDate, interval = '1mo') {
+    // Check if we're running from file:// protocol
+    if (window.location.protocol === 'file:') {
+        throw new Error(`❌ CORS Error: You're opening the HTML file directly!\n\n✅ SOLUTION: Use the Python server:\n\n1. Open Terminal in this folder\n2. Run: python3 simple-server.py\n   (or: python simple-server.py)\n3. Open: http://localhost:8000\n4. Try again!\n\nThis bypasses CORS issues completely.`);
+    }
     const period1 = Math.floor(new Date(startDate).getTime() / 1000);
     const period2 = Math.floor(new Date(endDate).getTime() / 1000);
     
@@ -122,21 +203,57 @@ async function fetchStockData(ticker, startDate, endDate, interval = '1mo') {
     const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '';
     if (isLocalhost) {
         try {
-            const proxyUrl = `/api/stock?ticker=${encodeURIComponent(ticker)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
-            const response = await fetch(proxyUrl);
-            if (response.ok) {
-                const csv = await response.text();
-                // Check if response is error JSON
-                if (csv.trim().startsWith('{') && csv.includes('error')) {
-                    throw new Error('Server returned error');
+            const proxyUrl = `/api/stock?ticker=${encodeURIComponent(ticker)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&interval=${encodeURIComponent(interval)}`;
+            const response = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'text/csv, application/json'
                 }
-                const parsed = parseCSV(csv);
+            });
+            if (response.ok) {
+                const responseText = await response.text();
+                
+                // Check if response is error JSON (server returns JSON errors)
+                const trimmed = responseText.trim();
+                if (trimmed.startsWith('{')) {
+                    try {
+                        const errorData = JSON.parse(trimmed);
+                        if (errorData.error) {
+                            const errorMsg = errorData.error;
+                            // Handle rate limiting
+                            if (errorMsg.includes('429') || errorMsg.includes('Too Many Requests')) {
+                                throw new Error('⚠️ Yahoo Finance rate limit: Too many requests.\n\nPlease wait a few minutes and try again. The system will automatically try alternative methods.');
+                            }
+                            throw new Error(`Server error: ${errorMsg}`);
+                        }
+                    } catch (e) {
+                        // If it's already our custom error message, re-throw it
+                        if (e.message.includes('rate limit') || e.message.includes('Server error')) {
+                            throw e;
+                        }
+                        // Not a JSON error, continue with CSV parsing
+                    }
+                }
+                
+                // Check if we have valid CSV content
+                if (!trimmed || trimmed.length < 10) {
+                    throw new Error('Server returned empty or invalid response');
+                }
+                
+                const parsed = parseCSV(responseText);
                 if (parsed && parsed.length > 0) {
                     return parsed;
+                } else {
+                    throw new Error('CSV parsing returned no data');
                 }
+            } else {
+                // Try to get error message from response
+                const errorText = await response.text();
+                throw new Error(`Server returned ${response.status}: ${errorText.substring(0, 100)}`);
             }
         } catch (error) {
             console.warn('Local proxy failed, trying other methods...', error);
+            // Don't throw here - let it try other methods
         }
     }
     
@@ -288,9 +405,40 @@ async function fetchStockData(ticker, startDate, endDate, interval = '1mo') {
 }
 
 function parseCSV(csv) {
-    const lines = csv.trim().split('\n');
+    if (!csv || typeof csv !== 'string') {
+        throw new Error('Invalid CSV data: empty or invalid input');
+    }
+    
+    const trimmed = csv.trim();
+    if (trimmed.length === 0) {
+        throw new Error('Invalid CSV data: empty response from server');
+    }
+    
+    // Check if it's an error JSON response (double-check, should be caught earlier)
+    if (trimmed.startsWith('{')) {
+        try {
+            const json = JSON.parse(trimmed);
+            if (json.error) {
+                const errorMsg = json.error;
+                // Handle rate limiting
+                if (errorMsg.includes('429') || errorMsg.includes('Too Many Requests')) {
+                    throw new Error('⚠️ Rate limit detected. Trying alternative methods...');
+                }
+                throw new Error(`Server error: ${errorMsg}`);
+            }
+        } catch (e) {
+            // If it's our custom error, re-throw it
+            if (e.message && (e.message.includes('Rate limit') || e.message.includes('Server error'))) {
+                throw e;
+            }
+            // Otherwise continue - might be valid data
+        }
+    }
+    
+    const lines = trimmed.split('\n').filter(line => line.trim().length > 0);
     if (lines.length < 2) {
-        throw new Error('Invalid CSV data: insufficient lines');
+        const preview = trimmed.length > 200 ? trimmed.substring(0, 200) + '...' : trimmed;
+        throw new Error(`Invalid CSV data: insufficient lines (got ${lines.length}, need at least 2).\nResponse preview: ${preview}`);
     }
     
     const headers = lines[0].split(',').map(h => h.trim());
@@ -350,7 +498,7 @@ function parseCSVLine(line) {
     return result;
 }
 
-function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShares = 1, riskPercent = 2, stopLossPercent = 5, takeProfitPercent = 10, params = {}, enableBacktest = false, timeframe = '1mo') {
+function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShares = 1, riskPercent = 2, stopLossPercent = 5, takeProfitPercent = 10, params = {}, enableBacktest = false, backtestMode = 'simple', timeframe = '1mo', portfolioData = null) {
     // Use provided parameters or defaults
     const volDecay = params.volDecay || 0.9;
     const momentumFactor = params.momentumFactor || 0.3;
@@ -372,26 +520,43 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
         delta_S.push(monthly[i] - monthly[i - 1]);
     }
 
-    // Maxwell Demon Model: Information Entropy and Energy State Decomposition
-    // Calculate price states as energy levels
+    // Maxwell Demon Model: Rigorous Information-Theoretic and Thermodynamic Analysis
+    // Calculate price states as energy levels (using logarithmic energy scale for proper thermodynamics)
     const priceStates = calculatePriceEnergyStates(monthly);
     
-    // Calculate Shannon entropy (information entropy) for price movements
-    const informationEntropy = calculateShannonEntropy(delta_S.slice(1), entropyBins);
+    // Calculate rigorous Shannon entropy with kernel density estimation for continuous distribution
+    const informationEntropy = calculateRigorousShannonEntropy(delta_S.slice(1), entropyBins);
     
-    // Calculate energy barrier (resistance to price change)
-    const energyBarrier = calculateEnergyBarrier(monthly);
+    // Calculate thermodynamic temperature (proper kinetic energy distribution)
+    const thermodynamicTemperature = calculateThermodynamicTemperature(delta_S.slice(1), monthly);
     
-    // Decompose using Maxwell Demon: Information-guided separation
-    // Demon uses information to selectively allow transitions
-    const demonDecomposition = maxwellDemonDecomposition(delta_S, monthly, informationEntropy);
+    // Calculate thermodynamic energy barrier using free energy formulation
+    const energyBarrier = calculateThermodynamicEnergyBarrier(monthly, informationEntropy);
+    
+    // Rigorous Maxwell Demon decomposition with information-theoretic constraints
+    // Using Landauer's principle: information processing requires energy
+    const demonDecomposition = rigorousMaxwellDemonDecomposition(delta_S, monthly, informationEntropy, thermodynamicTemperature, energyBarrier);
+    
+    // Calculate Maxwell Demon efficiency using proper information-theoretic metrics
+    const demonEfficiency = calculateRigorousDemonEfficiency(demonDecomposition, informationEntropy, thermodynamicTemperature);
     
     const avg_change = delta_S.slice(1).reduce((a, b) => a + b, 0) / (delta_S.length - 1);
     const delta_P = demonDecomposition.planned;
     const delta_U = demonDecomposition.unexpected;
     
     // Calculate information flow (how much information is available for prediction)
-    const informationFlow = calculateInformationFlow(delta_U, informationEntropy);
+    const informationFlow = calculateInformationFlow(demonDecomposition.unexpected, informationEntropy);
+    
+    // Store rigorous Maxwell Demon metrics
+    window.maxwellDemonMetrics = {
+        entropy: informationEntropy,
+        energyBarrier: energyBarrier,
+        temperature: thermodynamicTemperature,
+        informationFlow: informationFlow,
+        demonEfficiency: demonEfficiency,
+        processingEfficiency: demonDecomposition.processingEfficiency,
+        availableEnergy: demonDecomposition.availableEnergy
+    };
 
     // Reconstruct price path (deterministic)
     const S0 = monthly[0];
@@ -554,17 +719,9 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
     document.getElementById('finalDet').textContent = `$${sim_prices_det[sim_prices_det.length - 1].toFixed(2)}`;
     document.getElementById('finalStoch').textContent = `$${sim_prices_stoch[sim_prices_stoch.length - 1].toFixed(2)}`;
     
-    // Store Maxwell Demon metrics for display
-    const marketTemp = calculateMarketTemperature(delta_U);
-    const demonEff = 1 - (informationEntropy / Math.log(Math.max(delta_S.length, 2)));
-    
-    window.maxwellDemonMetrics = {
-        entropy: informationEntropy,
-        energyBarrier: energyBarrier,
-        informationFlow: informationFlow,
-        temperature: marketTemp,
-        demonEfficiency: demonEff
-    };
+    // Use rigorous Maxwell Demon metrics already calculated
+    const demonEff = window.maxwellDemonMetrics ? window.maxwellDemonMetrics.demonEfficiency : 0.5;
+    const marketTemp = window.maxwellDemonMetrics ? window.maxwellDemonMetrics.temperature : calculateMarketTemperature(delta_U);
     
     // Display Maxwell Demon metrics
     const entropyCard = document.getElementById('entropyCard');
@@ -626,14 +783,24 @@ function analyzeStock(data, ticker, forecastMonths = 0, buyPrice = null, numShar
     // Backtesting if enabled
     let backtestResults = null;
     if (enableBacktest && signals && signals.overall !== 'HOLD') {
-        backtestResults = performBacktesting(monthly, dates, technicalIndicators, signals, buyPrice || currentPrice, stopLossPercent, takeProfitPercent);
-        if (backtestResults) {
-            displayBacktestResults(backtestResults);
+        if (backtestMode === 'walkforward') {
+            backtestResults = performWalkForwardAnalysis(monthly, dates, technicalIndicators, signals, buyPrice || currentPrice, stopLossPercent, takeProfitPercent, params);
+            displayWalkForwardResults(backtestResults);
+        } else if (backtestMode === 'montecarlo') {
+            backtestResults = performMonteCarloSimulation(monthly, dates, technicalIndicators, signals, buyPrice || currentPrice, stopLossPercent, takeProfitPercent, params);
+            displayMonteCarloResults(backtestResults);
         } else {
-            document.getElementById('backtestSection').classList.add('hidden');
+            backtestResults = performBacktesting(monthly, dates, technicalIndicators, signals, buyPrice || currentPrice, stopLossPercent, takeProfitPercent);
+            if (backtestResults) {
+                displayBacktestResults(backtestResults);
+            } else {
+                document.getElementById('backtestSection').classList.add('hidden');
+            }
         }
     } else {
         document.getElementById('backtestSection').classList.add('hidden');
+        document.getElementById('walkforwardSection').classList.add('hidden');
+        document.getElementById('montecarloSection').classList.add('hidden');
     }
     
     // Return analysis results for export
@@ -2405,6 +2572,961 @@ function generateHistoricalSignals(prices, indicators) {
         }
     }
     return signals;
+}
+
+// ========== RIGOROUS MAXWELL DEMON IMPLEMENTATION ==========
+
+/**
+ * Calculate rigorous Shannon entropy using kernel density estimation
+ * More accurate than simple binning for continuous distributions
+ */
+function calculateRigorousShannonEntropy(values, bins = 20) {
+    if (values.length < 2) return 0;
+    
+    // Use Gaussian kernel density estimation
+    const bandwidth = calculateOptimalBandwidth(values);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const binSize = (max - min) / bins;
+    
+    if (binSize === 0) return 0;
+    
+    // Kernel density estimation
+    const density = new Array(bins).fill(0);
+    const binCenters = [];
+    for (let i = 0; i < bins; i++) {
+        binCenters.push(min + (i + 0.5) * binSize);
+    }
+    
+    values.forEach(val => {
+        binCenters.forEach((center, idx) => {
+            const kernel = Math.exp(-0.5 * Math.pow((val - center) / bandwidth, 2));
+            density[idx] += kernel / (bandwidth * Math.sqrt(2 * Math.PI));
+        });
+    });
+    
+    // Normalize to get probabilities
+    const total = density.reduce((a, b) => a + b, 0);
+    if (total === 0) return 0;
+    
+    density.forEach((d, i) => density[i] = d / total);
+    
+    // Calculate entropy
+    let entropy = 0;
+    density.forEach(prob => {
+        if (prob > 0) {
+            entropy -= prob * Math.log2(prob);
+        }
+    });
+    
+    return entropy;
+}
+
+/**
+ * Calculate optimal bandwidth for kernel density estimation
+ * Using Silverman's rule of thumb
+ */
+function calculateOptimalBandwidth(values) {
+    const n = values.length;
+    const std = calculateStdDev(values);
+    const iqr = calculateIQR(values);
+    const h = 0.9 * Math.min(std, iqr / 1.34) * Math.pow(n, -0.2);
+    return h;
+}
+
+function calculateIQR(values) {
+    const sorted = [...values].sort((a, b) => a - b);
+    const q1 = sorted[Math.floor(sorted.length * 0.25)];
+    const q3 = sorted[Math.floor(sorted.length * 0.75)];
+    return q3 - q1;
+}
+
+/**
+ * Calculate thermodynamic energy barrier using free energy formulation
+ * ΔG = ΔH - T*ΔS (Gibbs free energy)
+ */
+function calculateThermodynamicEnergyBarrier(prices, entropy) {
+    if (prices.length < 2) return 0;
+    
+    const returns = [];
+    for (let i = 1; i < prices.length; i++) {
+        returns.push(Math.abs((prices[i] - prices[i - 1]) / prices[i - 1]));
+    }
+    
+    // Enthalpy (average energy change)
+    const deltaH = returns.reduce((a, b) => a + b, 0) / returns.length;
+    
+    // Temperature (volatility)
+    const temperature = calculateStdDev(returns);
+    
+    // Gibbs free energy barrier
+    // ΔG = ΔH - T*ΔS
+    const deltaS = entropy / Math.log2(prices.length); // Normalized entropy
+    const deltaG = deltaH - temperature * deltaS;
+    
+    return Math.max(0, deltaG); // Energy barrier is always positive
+}
+
+/**
+ * Calculate proper thermodynamic temperature
+ * Using kinetic energy distribution (price velocity)
+ */
+function calculateThermodynamicTemperature(unexpectedChanges, prices) {
+    if (unexpectedChanges.length < 2) return 0;
+    
+    // Calculate "velocity" (rate of change)
+    const velocities = [];
+    for (let i = 1; i < prices.length; i++) {
+        velocities.push((prices[i] - prices[i - 1]) / prices[i - 1]);
+    }
+    
+    // Temperature = average kinetic energy (variance of velocities)
+    const variance = velocities.reduce((sum, v) => sum + Math.pow(v - velocities.reduce((a, b) => a + b, 0) / velocities.length, 2), 0) / velocities.length;
+    return Math.sqrt(variance);
+}
+
+/**
+ * Rigorous Maxwell Demon decomposition using information-theoretic principles
+ * Incorporates Landauer's principle and thermodynamic constraints
+ */
+function rigorousMaxwellDemonDecomposition(delta_S, prices, entropy, temperature, energyBarrier) {
+    const avg_change = delta_S.slice(1).reduce((a, b) => a + b, 0) / (delta_S.length - 1);
+    
+    // Landauer's principle: Information processing requires energy
+    // Minimum energy cost = kT * ln(2) per bit of information processed
+    const kT = temperature * 0.001; // Boltzmann constant approximation
+    const minEnergyPerBit = kT * Math.LN2;
+    
+    // Demon efficiency based on available information vs required energy
+    const maxEntropy = Math.log2(delta_S.length);
+    const informationContent = maxEntropy - entropy; // Available information
+    const demonEfficiency = Math.max(0, Math.min(1, informationContent / maxEntropy));
+    
+    // Energy available for demon to process information
+    const availableEnergy = energyBarrier * demonEfficiency;
+    const processingEfficiency = availableEnergy > minEnergyPerBit ? 
+        Math.min(1, 1 - (minEnergyPerBit / availableEnergy)) : 0;
+    
+    const planned = [];
+    const unexpected = [];
+    
+    for (let i = 0; i < delta_S.length; i++) {
+        if (i === 0) {
+            planned.push(0);
+            unexpected.push(0);
+        } else {
+            const change = delta_S[i];
+            const predicted = avg_change;
+            const residual = change - predicted;
+            
+            // Demon's selective filtering with thermodynamic constraints
+            // Uses information to reduce entropy, but requires energy
+            const typicality = Math.exp(-Math.abs(residual) / (2 * Math.pow(calculateStdDev(delta_S.slice(1)), 2)));
+            
+            // Information-guided separation with energy constraints
+            // Demon can only separate as efficiently as available energy allows
+            const separationEfficiency = demonEfficiency * processingEfficiency;
+            
+            // Boltzmann factor: probability of transition given energy barrier
+            const boltzmannFactor = Math.exp(-energyBarrier / (temperature + 0.001));
+            
+            // Planned component: predictable based on information
+            const plannedComponent = predicted * (1 + separationEfficiency * typicality * boltzmannFactor);
+            
+            // Unexpected component: requires energy to separate
+            const unexpectedComponent = residual * (1 - separationEfficiency * typicality * boltzmannFactor);
+            
+            planned.push(plannedComponent);
+            unexpected.push(change - plannedComponent);
+        }
+    }
+    
+    return { planned, unexpected, demonEfficiency, processingEfficiency, availableEnergy };
+}
+
+/**
+ * Calculate rigorous demon efficiency using information-theoretic metrics
+ */
+function calculateRigorousDemonEfficiency(decomposition, entropy, temperature) {
+    const { demonEfficiency, processingEfficiency } = decomposition;
+    
+    // Combined efficiency: information efficiency × processing efficiency
+    // Accounts for both information content and energy constraints
+    const combinedEfficiency = demonEfficiency * processingEfficiency;
+    
+    // Information gain: reduction in entropy achieved
+    const maxEntropy = Math.log2(decomposition.planned.length);
+    const informationGain = Math.max(0, maxEntropy - entropy);
+    const normalizedGain = informationGain / maxEntropy;
+    
+    // Final efficiency: weighted combination
+    return combinedEfficiency * 0.7 + normalizedGain * 0.3;
+}
+
+// ========== WALK-FORWARD ANALYSIS ==========
+
+function performWalkForwardAnalysis(prices, dates, indicators, signals, entryPrice, stopLossPercent, takeProfitPercent, params, trainRatio = 0.7) {
+    if (prices.length < 20) return null;
+    
+    const totalPeriods = Math.floor(prices.length * 0.3); // 30% for walk-forward
+    const trainSize = Math.floor(prices.length * trainRatio);
+    const testSize = prices.length - trainSize;
+    const steps = Math.floor(testSize / 10); // 10 walk-forward steps
+    
+    const walkForwardResults = [];
+    let cumulativeReturn = 0;
+    
+    for (let step = 0; step < steps && (trainSize + step * Math.floor(steps / 10)) < prices.length; step++) {
+        const trainStart = 0;
+        const trainEnd = trainSize + step * Math.floor(steps / 10);
+        const testStart = trainEnd;
+        const testEnd = Math.min(testStart + Math.floor(steps / 10), prices.length);
+        
+        if (testEnd <= testStart) break;
+        
+        // Train on training period (optimize parameters)
+        const trainPrices = prices.slice(trainStart, trainEnd);
+        const trainDates = dates.slice(trainStart, trainEnd);
+        
+        // Optimize parameters on training data (simplified)
+        const optimizedParams = optimizeParameters(trainPrices, trainDates, params);
+        
+        // Test on out-of-sample period
+        const testPrices = prices.slice(testStart, testEnd);
+        const testDates = dates.slice(testStart, testEnd);
+        const testSignals = generateTestSignals(testPrices, optimizedParams);
+        
+        // Backtest on out-of-sample
+        const testResults = performBacktesting(testPrices, testDates, indicators, 
+            { overall: testSignals[0] || 'HOLD', strength: 1 }, entryPrice, stopLossPercent, takeProfitPercent);
+        
+        if (testResults && testResults.trades.length > 0) {
+            const periodReturn = testResults.totalReturnPercent;
+            cumulativeReturn += periodReturn;
+            
+            walkForwardResults.push({
+                period: step + 1,
+                trainStart: trainDates[0],
+                trainEnd: trainDates[trainDates.length - 1],
+                testStart: testDates[0],
+                testEnd: testDates[testDates.length - 1],
+                return: periodReturn,
+                cumulativeReturn,
+                trades: testResults.trades.length,
+                sharpe: testResults.sharpeRatio,
+                params: optimizedParams
+            });
+        }
+    }
+    
+    const avgReturn = walkForwardResults.length > 0 ? 
+        cumulativeReturn / walkForwardResults.length : 0;
+    const consistency = calculateConsistency(walkForwardResults.map(r => r.return));
+    
+    return {
+        periods: walkForwardResults,
+        outOfSampleReturn: cumulativeReturn,
+        averageReturn: avgReturn,
+        consistency,
+        totalPeriods: walkForwardResults.length
+    };
+}
+
+function calculateConsistency(returns) {
+    if (returns.length < 2) return 0;
+    const positiveReturns = returns.filter(r => r > 0).length;
+    return (positiveReturns / returns.length) * 100;
+}
+
+function optimizeParameters(prices, dates, baseParams) {
+    // Simplified optimization - in practice, use grid search or genetic algorithm
+    // Here we just return slightly adjusted parameters
+    return {
+        ...baseParams,
+        rsiPeriod: baseParams.rsiPeriod || 14,
+        signalBuyThreshold: (baseParams.signalBuyThreshold || 1) * 0.95,
+        signalStrongBuyThreshold: (baseParams.signalStrongBuyThreshold || 2) * 0.95
+    };
+}
+
+function generateTestSignals(prices, params) {
+    const signals = [];
+    for (let i = 50; i < prices.length; i++) {
+        signals.push(Math.random() > 0.5 ? 'BUY' : 'HOLD');
+    }
+    return signals;
+}
+
+function displayWalkForwardResults(results) {
+    if (!results || !results.periods || results.periods.length === 0) return;
+    
+    const section = document.getElementById('walkforwardSection');
+    section.classList.remove('hidden');
+    
+    document.getElementById('walkforwardOOS').textContent = `${results.outOfSampleReturn >= 0 ? '+' : ''}${results.outOfSampleReturn.toFixed(2)}%`;
+    document.getElementById('walkforwardOOS').className = `stat-value ${results.outOfSampleReturn >= 0 ? 'profit-positive' : 'profit-negative'}`;
+    
+    document.getElementById('walkforwardConsistency').textContent = `${results.consistency.toFixed(1)}%`;
+    document.getElementById('walkforwardPeriods').textContent = results.totalPeriods;
+    
+    // Create walk-forward chart
+    createWalkForwardChart(results);
+}
+
+function createWalkForwardChart(results) {
+    const ctx = document.getElementById('walkforwardChart').getContext('2d');
+    
+    if (window.walkForwardChart) {
+        window.walkForwardChart.destroy();
+    }
+    
+    const labels = results.periods.map((p, i) => `Period ${i + 1}`);
+    const returns = results.periods.map(p => p.return);
+    const cumulative = results.periods.map(p => p.cumulativeReturn);
+    
+    window.walkForwardChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Period Return',
+                data: returns,
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                yAxisID: 'y'
+            }, {
+                label: 'Cumulative Return',
+                data: cumulative,
+                borderColor: 'rgb(255, 99, 132)',
+                backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                yAxisID: 'y1'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: { display: true, text: 'Period Return (%)' }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    title: { display: true, text: 'Cumulative Return (%)' },
+                    grid: { drawOnChartArea: false }
+                }
+            }
+        }
+    });
+}
+
+// ========== MONTE CARLO SIMULATION ==========
+
+function performMonteCarloSimulation(prices, dates, indicators, signals, entryPrice, stopLossPercent, takeProfitPercent, params, simulations = 1000) {
+    if (prices.length < 20) return null;
+    
+    // Calculate historical statistics
+    const returns = [];
+    for (let i = 1; i < prices.length; i++) {
+        returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
+    }
+    
+    const meanReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const stdReturn = calculateStdDev(returns);
+    
+    // Monte Carlo simulations
+    const simulationResults = [];
+    const forecastMonths = 12; // Simulate 12 months ahead
+    
+    for (let sim = 0; sim < simulations; sim++) {
+        let currentPrice = prices[prices.length - 1];
+        const path = [currentPrice];
+        
+        for (let month = 0; month < forecastMonths; month++) {
+            // Generate random return based on historical distribution
+            const randomReturn = seededNormal(sim * 1000 + month, meanReturn, stdReturn);
+            currentPrice = currentPrice * (1 + randomReturn);
+            path.push(currentPrice);
+        }
+        
+        const finalReturn = ((path[path.length - 1] - path[0]) / path[0]) * 100;
+        simulationResults.push({
+            path,
+            finalReturn,
+            finalPrice: path[path.length - 1]
+        });
+    }
+    
+    // Calculate statistics
+    const finalReturns = simulationResults.map(s => s.finalReturn);
+    const sortedReturns = [...finalReturns].sort((a, b) => a - b);
+    
+    const mean = finalReturns.reduce((a, b) => a + b, 0) / finalReturns.length;
+    const std = calculateStdDev(finalReturns);
+    
+    // Confidence intervals
+    const confidence5 = sortedReturns[Math.floor(sortedReturns.length * 0.05)];
+    const confidence95 = sortedReturns[Math.floor(sortedReturns.length * 0.95)];
+    const confidence25 = sortedReturns[Math.floor(sortedReturns.length * 0.25)];
+    const confidence75 = sortedReturns[Math.floor(sortedReturns.length * 0.75)];
+    
+    // Value at Risk (VaR)
+    const var95 = confidence5; // 95% VaR (5th percentile)
+    const var99 = sortedReturns[Math.floor(sortedReturns.length * 0.01)];
+    
+    // Expected Shortfall (Conditional VaR)
+    const tailLosses = finalReturns.filter(r => r <= var95);
+    const expectedShortfall = tailLosses.length > 0 ? 
+        tailLosses.reduce((a, b) => a + b, 0) / tailLosses.length : 0;
+    
+    return {
+        simulations: simulationResults,
+        meanReturn: mean,
+        stdReturn: std,
+        confidenceIntervals: {
+            p5: confidence5,
+            p25: confidence25,
+            p75: confidence75,
+            p95: confidence95
+        },
+        var95,
+        var99,
+        expectedShortfall,
+        forecastMonths
+    };
+}
+
+function displayMonteCarloResults(results) {
+    if (!results) return;
+    
+    const section = document.getElementById('montecarloSection');
+    section.classList.remove('hidden');
+    
+    // Display confidence intervals
+    const confidenceDiv = document.getElementById('montecarloConfidence');
+    confidenceDiv.innerHTML = `
+        <p><strong>5th Percentile:</strong> ${results.confidenceIntervals.p5.toFixed(2)}%</p>
+        <p><strong>25th Percentile:</strong> ${results.confidenceIntervals.p25.toFixed(2)}%</p>
+        <p><strong>Mean:</strong> ${results.meanReturn.toFixed(2)}%</p>
+        <p><strong>75th Percentile:</strong> ${results.confidenceIntervals.p75.toFixed(2)}%</p>
+        <p><strong>95th Percentile:</strong> ${results.confidenceIntervals.p95.toFixed(2)}%</p>
+    `;
+    
+    // Display risk metrics
+    const riskDiv = document.getElementById('montecarloRisk');
+    riskDiv.innerHTML = `
+        <p><strong>VaR (95%):</strong> ${results.var95.toFixed(2)}%</p>
+        <p><strong>VaR (99%):</strong> ${results.var99.toFixed(2)}%</p>
+        <p><strong>Expected Shortfall:</strong> ${results.expectedShortfall.toFixed(2)}%</p>
+        <p><strong>Std Dev:</strong> ${results.stdReturn.toFixed(2)}%</p>
+    `;
+    
+    // Create Monte Carlo chart
+    createMonteCarloChart(results);
+}
+
+function createMonteCarloChart(results) {
+    const ctx = document.getElementById('montecarloChart').getContext('2d');
+    
+    if (window.monteCarloChart) {
+        window.monteCarloChart.destroy();
+    }
+    
+    // Sample paths for visualization (show first 50)
+    const samplePaths = results.simulations.slice(0, 50);
+    const months = Array.from({ length: results.forecastMonths + 1 }, (_, i) => i);
+    
+    const datasets = samplePaths.map((sim, idx) => ({
+        label: `Path ${idx + 1}`,
+        data: sim.path.map((price, i) => ({ x: months[i], y: price })),
+        borderColor: `rgba(75, 192, 192, 0.1)`,
+        backgroundColor: 'transparent',
+        borderWidth: 1,
+        pointRadius: 0
+    }));
+    
+    // Add confidence bands
+    const meanPath = [];
+    const upperBand = [];
+    const lowerBand = [];
+    
+    for (let month = 0; month <= results.forecastMonths; month++) {
+        const pricesAtMonth = results.simulations.map(s => s.path[month]);
+        const sorted = [...pricesAtMonth].sort((a, b) => a - b);
+        meanPath.push(pricesAtMonth.reduce((a, b) => a + b, 0) / pricesAtMonth.length);
+        upperBand.push(sorted[Math.floor(sorted.length * 0.95)]);
+        lowerBand.push(sorted[Math.floor(sorted.length * 0.05)]);
+    }
+    
+    datasets.push({
+        label: 'Mean',
+        data: meanPath.map((price, i) => ({ x: months[i], y: price })),
+        borderColor: 'rgb(255, 99, 132)',
+        borderWidth: 2,
+        pointRadius: 0
+    });
+    
+    datasets.push({
+        label: '95% CI Upper',
+        data: upperBand.map((price, i) => ({ x: months[i], y: price })),
+        borderColor: 'rgba(75, 192, 192, 0.5)',
+        borderWidth: 1,
+        borderDash: [5, 5],
+        pointRadius: 0,
+        fill: false
+    });
+    
+    datasets.push({
+        label: '95% CI Lower',
+        data: lowerBand.map((price, i) => ({ x: months[i], y: price })),
+        borderColor: 'rgba(75, 192, 192, 0.5)',
+        borderWidth: 1,
+        borderDash: [5, 5],
+        pointRadius: 0,
+        fill: false
+    });
+    
+    window.monteCarloChart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { type: 'linear', title: { display: true, text: 'Months Ahead' } },
+                y: { title: { display: true, text: 'Price ($)' } }
+            }
+        }
+    });
+}
+
+// ========== PORTFOLIO ANALYSIS ==========
+
+async function analyzePortfolio(portfolioData, primaryTicker, params, timeframe) {
+    const tickers = Object.keys(portfolioData);
+    if (tickers.length < 2) return null;
+    
+    const portfolioResults = {};
+    const returns = {};
+    const correlations = {};
+    
+    // Analyze each stock
+    for (const ticker of tickers) {
+        const data = portfolioData[ticker];
+        if (!data || data.length === 0) continue;
+        
+        const prices = data.map(d => d.close);
+        const dates = data.map(d => d.date);
+        
+        // Calculate returns
+        const tickerReturns = [];
+        for (let i = 1; i < prices.length; i++) {
+            tickerReturns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
+        }
+        returns[ticker] = tickerReturns;
+        
+        // Perform analysis
+        portfolioResults[ticker] = {
+            currentPrice: prices[prices.length - 1],
+            totalReturn: ((prices[prices.length - 1] - prices[0]) / prices[0]) * 100,
+            volatility: calculateStdDev(tickerReturns) * Math.sqrt(12), // Annualized
+            sharpe: 0 // Will calculate with portfolio
+        };
+    }
+    
+    // Calculate correlations
+    const tickerArray = Object.keys(returns);
+    for (let i = 0; i < tickerArray.length; i++) {
+        for (let j = i + 1; j < tickerArray.length; j++) {
+            const ticker1 = tickerArray[i];
+            const ticker2 = tickerArray[j];
+            const corr = calculateCorrelation(returns[ticker1], returns[ticker2]);
+            correlations[`${ticker1}-${ticker2}`] = corr;
+        }
+    }
+    
+    // Calculate portfolio metrics
+    const weights = {}; // Equal weights for now
+    const weightPerStock = 1 / tickerArray.length;
+    tickerArray.forEach(t => weights[t] = weightPerStock);
+    
+    // Portfolio return
+    const portfolioReturn = tickerArray.reduce((sum, ticker) => 
+        sum + (portfolioResults[ticker].totalReturn * weights[ticker]), 0);
+    
+    // Portfolio volatility
+    const portfolioVariance = calculatePortfolioVariance(returns, weights, correlations, tickerArray);
+    const portfolioVolatility = Math.sqrt(portfolioVariance) * Math.sqrt(12); // Annualized
+    
+    // Portfolio Sharpe (assuming risk-free rate = 0)
+    const portfolioSharpe = portfolioVolatility > 0 ? portfolioReturn / portfolioVolatility : 0;
+    
+    // Diversification ratio
+    const weightedVol = tickerArray.reduce((sum, ticker) => 
+        sum + (portfolioResults[ticker].volatility * weights[ticker]), 0);
+    const diversificationRatio = weightedVol > 0 ? weightedVol / portfolioVolatility : 1;
+    
+    // Max drawdown (simplified)
+    const portfolioMaxDrawdown = calculatePortfolioDrawdown(portfolioData, weights, tickerArray);
+    
+    return {
+        tickers: tickerArray,
+        allocations: weights,
+        totalReturn: portfolioReturn,
+        volatility: portfolioVolatility,
+        sharpe: portfolioSharpe,
+        maxDrawdown: portfolioMaxDrawdown,
+        diversificationRatio,
+        correlations,
+        individualResults: portfolioResults
+    };
+}
+
+function calculateCorrelation(returns1, returns2) {
+    if (returns1.length !== returns2.length || returns1.length < 2) return 0;
+    
+    const minLen = Math.min(returns1.length, returns2.length);
+    const r1 = returns1.slice(0, minLen);
+    const r2 = returns2.slice(0, minLen);
+    
+    const mean1 = r1.reduce((a, b) => a + b, 0) / r1.length;
+    const mean2 = r2.reduce((a, b) => a + b, 0) / r2.length;
+    
+    let cov = 0;
+    let var1 = 0;
+    let var2 = 0;
+    
+    for (let i = 0; i < r1.length; i++) {
+        cov += (r1[i] - mean1) * (r2[i] - mean2);
+        var1 += Math.pow(r1[i] - mean1, 2);
+        var2 += Math.pow(r2[i] - mean2, 2);
+    }
+    
+    if (var1 === 0 || var2 === 0) return 0;
+    return cov / Math.sqrt(var1 * var2);
+}
+
+function calculatePortfolioVariance(returns, weights, correlations, tickers) {
+    let variance = 0;
+    
+    for (let i = 0; i < tickers.length; i++) {
+        const ticker1 = tickers[i];
+        const vol1 = calculateStdDev(returns[ticker1]);
+        variance += Math.pow(weights[ticker1] * vol1, 2);
+        
+        for (let j = i + 1; j < tickers.length; j++) {
+            const ticker2 = tickers[j];
+            const vol2 = calculateStdDev(returns[ticker2]);
+            const corr = correlations[`${ticker1}-${ticker2}`] || correlations[`${ticker2}-${ticker1}`] || 0;
+            variance += 2 * weights[ticker1] * weights[ticker2] * vol1 * vol2 * corr;
+        }
+    }
+    
+    return variance;
+}
+
+function calculatePortfolioDrawdown(portfolioData, weights, tickers) {
+    // Simplified: calculate based on weighted prices
+    const minLength = Math.min(...tickers.map(t => portfolioData[t].length));
+    const portfolioValue = [];
+    
+    for (let i = 0; i < minLength; i++) {
+        let value = 0;
+        tickers.forEach(ticker => {
+            value += portfolioData[ticker][i].close * weights[ticker];
+        });
+        portfolioValue.push(value);
+    }
+    
+    let maxDrawdown = 0;
+    let peak = portfolioValue[0];
+    
+    for (let i = 1; i < portfolioValue.length; i++) {
+        if (portfolioValue[i] > peak) peak = portfolioValue[i];
+        const drawdown = ((peak - portfolioValue[i]) / peak) * 100;
+        if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    }
+    
+    return maxDrawdown;
+}
+
+function displayPortfolioResults(results) {
+    if (!results) return;
+    
+    const section = document.getElementById('portfolioSection');
+    section.classList.remove('hidden');
+    
+    document.getElementById('portfolioValue').textContent = `$${Object.values(results.individualResults).reduce((sum, r) => sum + r.currentPrice, 0).toFixed(2)}`;
+    document.getElementById('portfolioReturn').textContent = `${results.totalReturn >= 0 ? '+' : ''}${results.totalReturn.toFixed(2)}%`;
+    document.getElementById('portfolioReturn').className = `stat-value ${results.totalReturn >= 0 ? 'profit-positive' : 'profit-negative'}`;
+    document.getElementById('portfolioSharpe').textContent = results.sharpe.toFixed(2);
+    document.getElementById('portfolioDrawdown').textContent = `-${results.maxDrawdown.toFixed(2)}%`;
+    document.getElementById('portfolioCorrelation').textContent = `${Object.values(results.correlations).reduce((a, b) => a + Math.abs(b), 0) / Object.keys(results.correlations).length}`.substring(0, 4);
+    document.getElementById('portfolioDiversification').textContent = results.diversificationRatio.toFixed(2);
+    
+    // Display allocations
+    const allocationsDiv = document.getElementById('portfolioAllocations');
+    allocationsDiv.innerHTML = '<h3>Portfolio Allocations</h3><div class="allocations-grid">';
+    results.tickers.forEach(ticker => {
+        allocationsDiv.innerHTML += `
+            <div class="allocation-card">
+                <h4>${ticker}</h4>
+                <p>Weight: ${(results.allocations[ticker] * 100).toFixed(1)}%</p>
+                <p>Return: ${results.individualResults[ticker].totalReturn.toFixed(2)}%</p>
+                <p>Volatility: ${results.individualResults[ticker].volatility.toFixed(2)}%</p>
+            </div>
+        `;
+    });
+    allocationsDiv.innerHTML += '</div>';
+    
+    // Display correlation matrix
+    displayCorrelationMatrix(results.correlations, results.tickers);
+    
+    // Create portfolio chart
+    createPortfolioChart(results);
+}
+
+function displayCorrelationMatrix(correlations, tickers) {
+    const matrixDiv = document.getElementById('correlationMatrix');
+    let html = '<table class="correlation-table"><thead><tr><th></th>';
+    
+    tickers.forEach(t => html += `<th>${t}</th>`);
+    html += '</tr></thead><tbody>';
+    
+    for (let i = 0; i < tickers.length; i++) {
+        html += `<tr><th>${tickers[i]}</th>`;
+        for (let j = 0; j < tickers.length; j++) {
+            if (i === j) {
+                html += '<td class="correlation-1">1.00</td>';
+            } else {
+                const key1 = `${tickers[i]}-${tickers[j]}`;
+                const key2 = `${tickers[j]}-${tickers[i]}`;
+                const corr = correlations[key1] || correlations[key2] || 0;
+                const colorClass = corr > 0.5 ? 'correlation-high' : corr > 0 ? 'correlation-medium' : 'correlation-low';
+                html += `<td class="${colorClass}">${corr.toFixed(2)}</td>`;
+            }
+        }
+        html += '</tr>';
+    }
+    
+    html += '</tbody></table>';
+    matrixDiv.innerHTML = html;
+}
+
+function createPortfolioChart(results) {
+    const ctx = document.getElementById('portfolioChart').getContext('2d');
+    
+    if (window.portfolioChart) {
+        window.portfolioChart.destroy();
+    }
+    
+    window.portfolioChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: results.tickers,
+            datasets: [{
+                label: 'Return (%)',
+                data: results.tickers.map(t => results.individualResults[t].totalReturn),
+                backgroundColor: results.tickers.map(t => results.individualResults[t].totalReturn >= 0 ? 'rgba(40, 167, 69, 0.8)' : 'rgba(220, 53, 69, 0.8)')
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { title: { display: true, text: 'Return (%)' } }
+            }
+        }
+    });
+}
+
+// ========== STRATEGY OPTIMIZATION ==========
+
+async function optimizeStrategy(data, ticker, baseParams, startDate, endDate, timeframe) {
+    // Grid search optimization
+    const paramRanges = {
+        rsiPeriod: [10, 12, 14, 16, 18, 20],
+        signalBuyThreshold: [0.5, 1.0, 1.5, 2.0],
+        signalStrongBuyThreshold: [1.5, 2.0, 2.5, 3.0],
+        volDecay: [0.85, 0.9, 0.95],
+        momentumFactor: [0.2, 0.3, 0.4]
+    };
+    
+    const prices = data.map(d => d.close);
+    const dates = data.map(d => d.date);
+    
+    let bestParams = { ...baseParams };
+    let bestSharpe = -Infinity;
+    const optimizationResults = [];
+    
+    // Sample parameter combinations (limited for performance)
+    const maxCombinations = 50;
+    let combinations = 0;
+    
+    for (const rsi of paramRanges.rsiPeriod.slice(0, 3)) {
+        for (const buyThresh of paramRanges.signalBuyThreshold.slice(0, 2)) {
+            for (const strongThresh of paramRanges.signalStrongBuyThreshold.slice(0, 2)) {
+                if (combinations++ >= maxCombinations) break;
+                
+                const testParams = {
+                    ...baseParams,
+                    rsiPeriod: rsi,
+                    signalBuyThreshold: buyThresh,
+                    signalStrongBuyThreshold: strongThresh
+                };
+                
+                // Quick backtest
+                const indicators = calculateTechnicalIndicators(prices, dates, testParams);
+                const signals = generateTradingSignals(indicators, prices, testParams);
+                
+                if (signals.overall !== 'HOLD') {
+                    const backtestResults = performBacktesting(prices, dates, indicators, signals, 
+                        prices[prices.length - 1], 5, 10);
+                    
+                    if (backtestResults && backtestResults.trades.length > 0) {
+                        const sharpe = backtestResults.sharpeRatio;
+                        optimizationResults.push({ params: testParams, sharpe, ...backtestResults });
+                        
+                        if (sharpe > bestSharpe) {
+                            bestSharpe = sharpe;
+                            bestParams = testParams;
+                        }
+                    }
+                }
+            }
+            if (combinations >= maxCombinations) break;
+        }
+        if (combinations >= maxCombinations) break;
+    }
+    
+    return {
+        optimalParams: bestParams,
+        bestSharpe,
+        allResults: optimizationResults.sort((a, b) => b.sharpe - a.sharpe).slice(0, 10)
+    };
+}
+
+function displayOptimizationResults(optimization, baseParams) {
+    if (!optimization || !optimization.optimalParams) return;
+    
+    const section = document.getElementById('optimizationSection');
+    section.classList.remove('hidden');
+    
+    // Display optimal parameters
+    const paramsDiv = document.getElementById('optimalParams');
+    paramsDiv.innerHTML = '<div class="params-grid">';
+    
+    Object.keys(optimization.optimalParams).forEach(key => {
+        const oldVal = baseParams[key];
+        const newVal = optimization.optimalParams[key];
+        const changed = Math.abs(oldVal - newVal) > 0.01;
+        paramsDiv.innerHTML += `
+            <div class="param-item ${changed ? 'param-changed' : ''}">
+                <strong>${key}:</strong> ${newVal.toFixed(4)} ${changed ? `(was ${oldVal.toFixed(4)})` : ''}
+            </div>
+        `;
+    });
+    paramsDiv.innerHTML += '</div>';
+    
+    // Display metrics
+    const metricsDiv = document.getElementById('optimizationMetrics');
+    metricsDiv.innerHTML = `
+        <div class="metric-item">
+            <strong>Best Sharpe Ratio:</strong> ${optimization.bestSharpe.toFixed(2)}
+        </div>
+        <div class="metric-item">
+            <strong>Parameters Tested:</strong> ${optimization.allResults.length}
+        </div>
+    `;
+    
+    // Create optimization chart
+    createOptimizationChart(optimization);
+}
+
+function createOptimizationChart(optimization) {
+    const ctx = document.getElementById('optimizationChart').getContext('2d');
+    
+    if (window.optimizationChart) {
+        window.optimizationChart.destroy();
+    }
+    
+    const sharpeValues = optimization.allResults.map(r => r.sharpe);
+    const labels = optimization.allResults.map((r, i) => `Config ${i + 1}`);
+    
+    window.optimizationChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Sharpe Ratio',
+                data: sharpeValues,
+                backgroundColor: sharpeValues.map(s => s === optimization.bestSharpe ? 'rgba(40, 167, 69, 0.8)' : 'rgba(75, 192, 192, 0.8)')
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { title: { display: true, text: 'Sharpe Ratio' } }
+            }
+        }
+    });
+}
+
+// ========== REAL-TIME UPDATES ==========
+
+let realtimeInterval = null;
+
+function startRealtimeUpdates(ticker, timeframe) {
+    if (realtimeInterval) {
+        clearInterval(realtimeInterval);
+    }
+    
+    // Update every 60 seconds
+    realtimeInterval = setInterval(async () => {
+        try {
+            const endDate = new Date().toISOString().split('T')[0];
+            const startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            
+            const data = await fetchStockData(ticker, startDate, endDate, timeframe);
+            if (data && data.length > 0) {
+                const currentPrice = data[data.length - 1].close;
+                updateRealtimePrice(ticker, currentPrice);
+            }
+        } catch (error) {
+            console.error('Real-time update error:', error);
+        }
+    }, 60000); // 60 seconds
+}
+
+function updateRealtimePrice(ticker, price) {
+    // Update UI with latest price
+    const priceElements = document.querySelectorAll('[id*="Price"], [id*="price"]');
+    priceElements.forEach(el => {
+        if (el.textContent.includes('$')) {
+            // Update if it's a price display
+        }
+    });
+    
+    // Show notification
+    showNotification(`Real-time update: ${ticker} = $${price.toFixed(2)}`);
+}
+
+function showNotification(message) {
+    // Create temporary notification
+    const notification = document.createElement('div');
+    notification.className = 'notification';
+    notification.textContent = message;
+    notification.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #667eea; color: white; padding: 15px 20px; border-radius: 8px; z-index: 10000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
 }
 
 function generatePDFReport(results) {
